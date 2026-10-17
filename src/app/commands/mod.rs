@@ -30,6 +30,7 @@ mod xclip;
 mod xref_attach;
 pub(crate) mod civil_surface;
 pub mod civil_parcel;
+pub mod parcel_interactive;
 
 // `DrawOrderRefCommand` lives in the `view` family file but is referenced by
 // path (`commands::DrawOrderRefCommand`) from `update.rs`, so re-export it at
@@ -304,6 +305,40 @@ impl OpenCADStudio {
                 tab.dirty = true;
                 self.command_line.push_output(&format!("✔ Dynamically synchronized {} parcel(s), centroid labels, and area table.", count));
             }
+            return Task::none();
+        }
+
+        // ── Civil 3D Interactive Slide Line Subdivision ──────────────────
+        if upper_cmd == "SLIDELINE" || upper_cmd == "PARCELSLIDELINE"
+            || (upper_cmd == "PC_SLIDE_LINE" && trimmed_cmd == "PC_SLIDE_LINE")
+            || upper_cmd.starts_with("SLIDELINE ")
+        {
+            let (min_area, min_frontage, frontage_offset) = if let Some(st) = &self.parcel_layout_state {
+                (
+                    st.min_area.parse::<f64>().unwrap_or(350.0),
+                    st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                    st.frontage_offset.parse::<f64>().unwrap_or(4.0),
+                )
+            } else {
+                (350.0, 12.0, 4.0)
+            };
+            let cmd_obj = parcel_interactive::SlideLineCommand::new(min_area, min_frontage, frontage_offset);
+            self.command_line.record_recent(cmd);
+            self.command_line.push_info(&cmd_obj.prompt());
+            self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            self.active_modal = None;
+            return Task::none();
+        }
+
+        // ── Civil 3D Create Parcel from Objects ───────────────────────────
+        if upper_cmd == "PARCELFROMOBJECTS" || upper_cmd == "CREATEPARCELFROMOBJECTS"
+            || (upper_cmd == "PC_CREATE" && trimmed_cmd == "PC_CREATE")
+        {
+            let cmd_obj = parcel_interactive::ParcelFromObjectsCommand::new();
+            self.command_line.record_recent(cmd);
+            self.command_line.push_info(&cmd_obj.prompt());
+            self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            self.active_modal = None;
             return Task::none();
         }
 

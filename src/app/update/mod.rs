@@ -6219,6 +6219,39 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ParcelLayoutAction(action) => {
+                if action == "slide" {
+                    self.active_modal = None; // Modeless: unblock canvas for picking
+                    let (min_area, min_frontage, frontage_offset) = if let Some(st) = &self.parcel_layout_state {
+                        (
+                            st.min_area.parse::<f64>().unwrap_or(350.0),
+                            st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                            st.frontage_offset.parse::<f64>().unwrap_or(4.0),
+                        )
+                    } else {
+                        (350.0, 12.0, 4.0)
+                    };
+                    let cmd_obj = crate::app::commands::parcel_interactive::SlideLineCommand::new(min_area, min_frontage, frontage_offset);
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Slide Line".to_string();
+                        st.status_message = "Civil 3D Slide Line: Pick parcel boundary on canvas.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "create" {
+                    self.active_modal = None; // Modeless: unblock canvas for picking
+                    let cmd_obj = crate::app::commands::parcel_interactive::ParcelFromObjectsCommand::new();
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Create Lot".to_string();
+                        st.status_message = "Civil 3D Create Lot: Pick closed polyline(s) on canvas.".to_string();
+                    }
+                    return Task::none();
+                }
+
                 let (cmd, msg) = match action.as_str() {
                     "create" => ("PC_CREATE", "Running Create Lot by Polyline / Boundary..."),
                     "slide" => ("PC_SLIDE_LINE", "Entering Interactive Slide Line lot sizing mode..."),
