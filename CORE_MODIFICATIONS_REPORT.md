@@ -87,35 +87,7 @@ graph TD
 
 #### 2. [`src/app/mod.rs`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/src/app/mod.rs)
 - **إضافة دالة المفاعل المركزي (`sync_dynamic_parcels_on_change`):**
-  ```rust
-  pub fn sync_dynamic_parcels_on_change(
-      &mut self,
-      tab_idx: usize,
-      target_handles: Option<&[codec::Handle]>,
-  ) {
-      if tab_idx >= self.tabs.len() { return; }
-      let tab = &mut self.tabs[tab_idx];
-
-      // Fast-path filter: التحقق السريع من ارتباط الكائنات بطبقات القطع
-      if let Some(handles) = target_handles {
-          if handles.is_empty() { return; }
-          let touches_parcel = handles.iter().any(|&h| {
-              if let Some(ent) = tab.scene.document.get_entity(h) {
-                  let layer = &ent.common().layer;
-                  layer.starts_with("PC-") || layer.contains("PARCEL") || layer.contains("LOT")
-                      || ent.common().extended_data.get_record(civil_parcel::XDATA_PARCEL).is_some()
-              } else { false }
-          });
-          if !touches_parcel { return; }
-      }
-
-      let updated = civil_parcel::ParcelData::sync_dynamic_parcels(&mut tab.scene.document, None, None);
-      if updated > 0 {
-          tab.scene.bump_geometry();
-          tab.dirty = true;
-      }
-  }
-  ```
+  - إضافة دالة سريعة تفحص الكيانات المعدلة وتطلق المزامنة وتعيد بناء تصيير المشهد `bump_geometry` وضبط علامة الاتساخ `tab.dirty = true`.
 - **تسجيل أنواع النوافذ المشروطة (`enum ModalKind`):**
   - إضافة `ParcelLayoutTools`, `ParcelProperties`, `SurfaceProperties`.
 - **تسجيل حالات النوافذ في هيكل `OpenCADStudio`:**
@@ -165,8 +137,7 @@ graph TD
   - **Information:** اسم السطح، الوصف، نمط الكنتور، وخامة الإظهار.
   - **Definition:** معايير البناء (Exclude Min Elevation, Exclude Max Elevation, Max Triangle Length).
   - **Analysis:** تقسيم المدى الارتفاعي وتعيين تدرجات الألوان الحبسومترية (Hypsometric Tints).
-  - **Statistics:** عدد النقاط والمثلثات، أقل وأقصى ومتوسط المنسوب، والمساحة الحقيقية 3D المحسوبة عبر ضرب المتجهات الفراغية:
-    $$\text{Area}_{3D} = \sum \frac{1}{2} \| (\vec{v}_1 - \vec{v}_0) \times (\vec{v}_2 - \vec{v}_0) \|$$
+  - **Statistics:** عدد النقاط والمثلثات، أقل وأقصى ومتوسط المنسوب، والمساحة الحقيقية 3D المحسوبة عبر ضرب المتجهات الفراغية.
 
 #### 9. [`src/ui/window/mod.rs`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/src/ui/window/mod.rs)
 - تصدير وحدات النوافذ الجديدة: `pub mod parcel_layout_tools;`, `pub mod parcel_properties;`, `pub mod surface_properties;`.
@@ -231,19 +202,43 @@ graph TD
 
 ---
 
+### النظام السادس: الأدوات التفاعلية لتقسيم الأراضي مطابقة لمنهجية Civil 3D 2021
+
+#### 23. [`src/app/commands/parcel_interactive.rs`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/src/app/commands/parcel_interactive.rs)
+- **محرك التقسيم الهندسي الثنائي (2D Polygon Slicing & Bisection Solver):**
+  - خوارزمية Shoelace لحساب المساحة ثنائية الأبعاد بدقة $10^{-6}$.
+  - خوارزمية البحث الثنائي (Bisection) على خط الواجهة $P(t) = P_{start} + t (P_{end} - P_{start})$ لتحديد خط التقسيم عند المساحة المستهدفة ($A_{target}$) بأي زاوية محددة.
+  - دعم الأشكال المستطيلة وشبه المنحرفة والمضلعات غير المنتظمة.
+- **أداة خط الانزلاق التفاعلية [`SlideLineCommand`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/src/app/commands/parcel_interactive.rs#L295):**
+  - تتبع منهجية Civil 3D 2021 خطوة بخطوة عبر مساحة الرسم (Viewport Picking):
+    1. اختيار قطعة الأرض (`Select parcel to be subdivided:`).
+    2. التقاط نقطة بداية الواجهة (`Select start point on frontage:`).
+    3. التقاط نقطة نهاية الواجهة (`Select end point on frontage:`).
+    4. تحديد زاوية الانزلاق نسبة للواجهة (`Specify angle relative to frontage <90.00>:`).
+    5. عرض المعاينة الحية السحابية (Live Ghost / Jig Wire Preview) بلونين (الخط باللون السماوي والقطعة المستهدفة باللون الذهبي).
+    6. تأكيد الاعتماد (`Accept result? [Yes/No] <Yes>:`).
+  - عند الاعتماد: يتم استبدال القطعة الأصلية بقطعتين جديدتين على طبقة `PC-PARCEL`، وتوليد نصوص بطاقات المركز ديناميكياً على طبقة `PC-PARCEL-LABEL`، وتحديث صفوف جدول المساحات `PC-TABLE` فورياً.
+- **أداة إنشاء القطع من الكائنات [`ParcelFromObjectsCommand`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/src/app/commands/parcel_interactive.rs#L775):**
+  - أمر `PARCELFROMOBJECTS`: يتيح اختيار الخطوط المغلقة أو الـ Polylines من مساحة الرسم وتحويلها مباشرة إلى قطع أراضي مع حساب المساحات وتعيين المواقع وتوليد البطاقات والجدول.
+
+#### 24. [`src/app/update/mod.rs`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/src/app/update/mod.rs#L6221)
+- تحويل نافذة `ParcelLayoutTools` إلى أداة لا تحجب مساحة الرسم (Modeless/Non-blocking): عند ضغط زر "Slide Line" أو "Create Lot" في شريط الأدوات، يتم إغلاق القناع الحاجب للرسم وتوجيه مؤشر الفأرة فورياً لتنفيذ الخطوات التفاعلية على لوحة الرسم مع تمرير معايير التصميم (Minimum Area, Minimum Frontage, Frontage Offset).
+
+#### 25. [`plugins/opencad-parcels-plugin/src/dispatch.rs`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/plugins/opencad-parcels-plugin/src/dispatch.rs#L334)
+- تفويض الأوامر `PC_SLIDE_LINE` و `PC_CREATE` عند تشغيلها بدون معاملات سطر أوامر إلى المحرك التفاعلي الحي في النواة بدلاً من إظهار رسالة خطأ الاستخدام (`Usage: PC_SLIDE_LINE...`).
+
+---
+
 ## 3. أدلة التحقق والاختبار (Verification Evidence)
 
 1. **بناء نظيف بالكامل بنجاح 100%:**
    - تم التحقق عبر `cargo check` و `cargo build`:
      `Finished dev profile [unoptimized + debuginfo] target(s) in target/debug/OpenCADStudio.exe`.
-2. **اختبار التحديث الديناميكي الحي على ملف المخطط الرئيسي (`Al_Waha_Masterplan_Clean.dwg`):**
-   - تم استرداد كافة القطع الـ 14 (`LOT-101` إلى `LOT-115`).
-   - تم تخليق نصوص المحيط `P: ... m` آلياً لجميع القطع المفقودة.
-   - تم تحديث صفوف جدول المساحات `PC-TABLE` بالكامل بدقة متناهية مطابقة لحسابات الـ Shoelace الهندسية.
+2. **اجتياز الاختبارات الآلية والرياضية بنسبة 100% (5/5 Tests Passed):**
+   - `test_shoelace_area_and_centroid ... ok`
+   - `test_solve_slide_line_rectangular ... ok`
+   - `test_solve_slide_line_trapezoid ... ok`
+   - `test_parcel_from_objects_workflow ... ok`
+   - `test_interactive_slide_line_command_workflow ... ok`
 3. **تحديث اختصار سطح المكتب:**
-   - تم توجيه الاختصار `C:\Users\j\Desktop\OpenCADStudio - Civil 3D Latest.lnk` إلى النسخة المبنية والمحدثة.
-
----
-
-> تم حفظ هذا التقرير كمرجع هندسي دائم في مسار المشروع:  
-> [`CORE_MODIFICATIONS_REPORT.md`](file:///c:/Users/j/Videos/OpenCADStudio-2026.41/OpenCADStudio-2026.41/CORE_MODIFICATIONS_REPORT.md)
+   - تم ربط الاختصار `C:\Users\j\Desktop\OpenCADStudio - Civil 3D Latest.lnk` بالنسخة الحديثة المتضمنة للأدوات التفاعلية.
