@@ -136,9 +136,6 @@ pub struct Pipeline {
     /// Capability-selected hatch renderer. Storage and texture transports are
     /// private backends behind one upload/LOD/draw lifecycle.
     hatch_gpu: hatch_gpu::HatchGpu,
-    /// Hatches with transparency, drawn after the wires so the lines behind
-    /// them show through the blend instead of failing the depth test.
-    hatch_translucent_gpu: hatch_gpu::HatchGpu,
     image_pipeline: wgpu::RenderPipeline,
     point_cloud_pipeline: wgpu::RenderPipeline,
     /// SDF text-quad pipeline (Phase 2b): draws per-glyph quads sampling the
@@ -182,10 +179,6 @@ pub struct Pipeline {
     uniform_buffer: wgpu::Buffer,
     frame_bgl: wgpu::BindGroupLayout,
     uniform_bind_group: wgpu::BindGroup,
-    /// The selection overlay's copy of the frame uniforms: transparency on,
-    /// so a translucent highlight colour shows, and lines widened.
-    selection_uniform_buffer: wgpu::Buffer,
-    selection_uniform_bind_group: wgpu::BindGroup,
     shadow_uniform_bind_group: wgpu::BindGroup,
     background_texture: wgpu::Texture,
     environment_texture: wgpu::Texture,
@@ -418,48 +411,11 @@ pub struct Pipeline {
     pub slot_id: u64,
 }
 
-/// The views and samplers the frame bind group carries beside its uniforms.
-struct FrameViews<'a> {
-    background: &'a wgpu::TextureView,
-    environment: &'a wgpu::TextureView,
-    background_sampler: &'a wgpu::Sampler,
-    shadow: &'a wgpu::TextureView,
-    shadow_sampler: &'a wgpu::Sampler,
-}
-
-fn frame_bind_group(
-    device: &wgpu::Device,
-    layout: &wgpu::BindGroupLayout,
-    uniforms: &wgpu::Buffer,
-    views: &FrameViews<'_>,
-) -> wgpu::BindGroup {
-    let entry = |binding, resource| wgpu::BindGroupEntry { binding, resource };
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("viewer.bind_group"),
-        layout,
-        entries: &[
-            entry(0, uniforms.as_entire_binding()),
-            entry(1, wgpu::BindingResource::TextureView(views.background)),
-            entry(2, wgpu::BindingResource::Sampler(views.background_sampler)),
-            entry(3, wgpu::BindingResource::TextureView(views.environment)),
-            entry(4, wgpu::BindingResource::Sampler(views.background_sampler)),
-            entry(5, wgpu::BindingResource::TextureView(views.shadow)),
-            entry(6, wgpu::BindingResource::Sampler(views.shadow_sampler)),
-        ],
-    })
-}
-
 impl Pipeline {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         // ── Shared frame uniform buffer (view_proj etc.) ───────────────────
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewer.uniform_buffer"),
-            size: std::mem::size_of::<Uniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let selection_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewer.selection_uniform_buffer"),
             size: std::mem::size_of::<Uniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -604,17 +560,40 @@ impl Pipeline {
             background_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let environment_view =
             environment_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let frame_views = FrameViews {
-            background: &background_view,
-            environment: &environment_view,
-            background_sampler: &background_sampler,
-            shadow: &shadow_fallback_view,
-            shadow_sampler: &shadow_sampler,
-        };
-        let uniform_bind_group =
-            frame_bind_group(device, &frame_bgl, &uniform_buffer, &frame_views);
-        let selection_uniform_bind_group =
-            frame_bind_group(device, &frame_bgl, &selection_uniform_buffer, &frame_views);
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewer.bind_group"),
+            layout: &frame_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&background_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&environment_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&shadow_fallback_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+            ],
+        });
         let shadow_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shadow.frame_bind_group"),
             layout: &shadow_frame_bgl,
@@ -1114,14 +1093,6 @@ impl Pipeline {
         // ── Hatch renderer ─────────────────────────────────────────────────
         // The façade owns capability selection plus both backend lifecycles.
         let hatch_gpu = hatch_gpu::HatchGpu::new(
-            device,
-            format,
-            &frame_bgl,
-            &content_stencil,
-            device_caps,
-            force_compat_renderer,
-        );
-        let hatch_translucent_gpu = hatch_gpu::HatchGpu::new(
             device,
             format,
             &frame_bgl,
@@ -2368,7 +2339,6 @@ impl Pipeline {
             gpu_error_epoch: gpu_errors_seen(),
             wipeout_pipeline,
             hatch_gpu,
-            hatch_translucent_gpu,
             image_pipeline,
             point_cloud_pipeline,
             text_pipeline,
@@ -2408,8 +2378,6 @@ impl Pipeline {
             uniform_buffer,
             frame_bgl,
             uniform_bind_group,
-            selection_uniform_buffer,
-            selection_uniform_bind_group,
             shadow_uniform_bind_group,
             background_texture,
             environment_texture,
@@ -2506,7 +2474,7 @@ impl Pipeline {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        wires: &[wire_gpu::BlockRef<'_>],
+        wires: &[&WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         block_geometry: &mut wire_gpu::BlockGeometryCache,
     ) -> Vec<BlockWireGpu> {
@@ -2640,7 +2608,7 @@ impl Pipeline {
         // and alpha blending both depend on it. Scissor and mesh-edge stay
         // grouping keys because the draw loop sets one scissor per batch and
         let mut batches: Vec<WireGpu> = Vec::new();
-        let mut block_wires: Vec<wire_gpu::BlockRef<'_>> = Vec::new();
+        let mut block_wires: Vec<&WireModel> = Vec::new();
         let mut i = 0;
         while i < wires.len() {
             let kind = wire_arena::classify_wire(&wires[i]);
@@ -2653,7 +2621,7 @@ impl Pipeline {
                     continue;
                 }
                 wire_arena::WireKind::Block => {
-                    wire_gpu::push_block_refs(&wires[i], &mut block_wires);
+                    block_wires.push(&wires[i]);
                     i += 1;
                     continue;
                 }
@@ -2741,7 +2709,7 @@ impl Pipeline {
         Vec<CircleInstance>,
         Vec<EllipseInstance>,
         Vec<&'a WireModel>,
-        Vec<wire_gpu::BlockRef<'a>>,
+        Vec<&'a WireModel>,
     ) {
         use crate::par::prelude::*;
         // Pure per-wire work, so it fans out; `collect` on an indexed
@@ -2754,7 +2722,7 @@ impl Pipeline {
         )> = wires
             .par_iter()
             .map(|&wire| {
-                if wire.render_instance.is_some() || wire.stub.is_some() {
+                if wire.render_instance.is_some() {
                     return (None, None, true);
                 }
                 let depth = wire_gpu::wire_draw_depth(wire, depth_map);
@@ -2783,10 +2751,10 @@ impl Pipeline {
         let mut circles: Vec<CircleInstance> = Vec::new();
         let mut ellipses: Vec<EllipseInstance> = Vec::new();
         let mut regular: Vec<&'a WireModel> = Vec::new();
-        let mut blocks: Vec<wire_gpu::BlockRef<'a>> = Vec::new();
+        let mut blocks: Vec<&'a WireModel> = Vec::new();
         for (&wire, (wire_circles, wire_ellipses, is_block)) in wires.iter().zip(per) {
             if is_block {
-                wire_gpu::push_block_refs(wire, &mut blocks);
+                blocks.push(wire);
                 continue;
             }
             let shaped = wire_circles.is_some() || wire_ellipses.is_some();
@@ -3211,10 +3179,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             let mut slots = rustc_hash::FxHashMap::default();
             let mut groups: Vec<Vec<&crate::scene::model::mesh_model::MeshLodSet>> = Vec::new();
             for (index, set) in sets.iter().enumerate() {
-                let color = set
-                    .edge_color
-                    .or_else(|| set.display_color())
-                    .unwrap_or([0.0, 0.0, 0.0, 1.0]);
+                let color = set.display_color().unwrap_or([0.0, 0.0, 0.0, 1.0]);
                 let key = match (&set.instance_source, set.instance_transform) {
                     (Some(source), Some(transform)) => {
                         let matrix = &transform.matrix.m;
@@ -3464,12 +3429,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         clip_h: u32,
     ) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
-        let visible = |aabb: [f32; 4]| {
+        let instance_count = self.hatch_gpu.update_visibility(queue, |aabb| {
             !aabb_below_pixel(aabb, view_rot, eye, clip_w, clip_h, 2.0)
                 && !aabb_offscreen(aabb, view_rot, eye, clip_w, clip_h)
-        };
-        let instance_count = self.hatch_gpu.update_visibility(queue, visible)
-            + self.hatch_translucent_gpu.update_visibility(queue, visible);
+        });
         if instance_count == 0 {
             return;
         }
@@ -3823,13 +3786,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             .iter()
             .filter(|hatch| hatch.boundary.len() >= 3)
             .count();
-        let (translucent, opaque): (Vec<HatchModel>, Vec<HatchModel>) = hatches
-            .iter()
-            .cloned()
-            .partition(|hatch| hatch.color[3] < 0.999);
-        self.hatch_gpu.upload(device, queue, &opaque);
-        self.hatch_translucent_gpu
-            .upload(device, queue, &translucent);
+        self.hatch_gpu.upload(device, queue, hatches);
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
             if elapsed_ms >= 1.0 {
@@ -3946,18 +3903,40 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         let environment_view = self
             .environment_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let views = FrameViews {
-            background: &background_view,
-            environment: &environment_view,
-            background_sampler: &self.background_sampler,
-            shadow: self.shadow_view(),
-            shadow_sampler: &self.shadow_sampler,
-        };
-        let frame = frame_bind_group(device, &self.frame_bgl, &self.uniform_buffer, &views);
-        let selection =
-            frame_bind_group(device, &self.frame_bgl, &self.selection_uniform_buffer, &views);
-        self.uniform_bind_group = frame;
-        self.selection_uniform_bind_group = selection;
+        self.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewer.bind_group"),
+            layout: &self.frame_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&background_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&environment_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.background_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(self.shadow_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+                },
+            ],
+        });
     }
 
     /// Allocate or drop the shadow target to match `shadow_enabled`.
@@ -3993,11 +3972,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         if self.shadow_full.is_none() {
             uniforms.shadow_params[0] = 0.0;
         }
-        let mut selection = uniforms;
-        selection.transparency_enable = 1.0;
-        uniforms.highlight_widen = 0.0;
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
-        queue.write_buffer(&self.selection_uniform_buffer, 0, bytemuck::bytes_of(&selection));
     }
 
     pub fn upload_background_images(
@@ -4021,8 +3996,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         }
         let upload = |label: &'static str,
                       image: Option<&crate::scene::model::image_model::DecodedImage>,
-                      fallback: [u8; 4],
-                      format: wgpu::TextureFormat| {
+                      fallback: [u8; 4]| {
             let (width, height, pixels) = image
                 .map(|image| (image.width, image.height, image.pixels.as_slice()))
                 .unwrap_or((1, 1, fallback.as_slice()));
@@ -4036,7 +4010,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
@@ -4056,21 +4030,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             );
             texture
         };
-        // The background image is drawn as it is, like the solid and gradient
-        // colours (an sRGB view would darken it a second time); the
-        // environment map stays sRGB for lighting.
-        self.background_texture = upload(
-            "background.texture",
-            background,
-            [0, 0, 0, 255],
-            wgpu::TextureFormat::Rgba8Unorm,
-        );
-        self.environment_texture = upload(
-            "environment.texture",
-            environment,
-            [128, 128, 128, 255],
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        self.background_texture = upload("background.texture", background, [0, 0, 0, 255]);
+        self.environment_texture = upload("environment.texture", environment, [128, 128, 128, 255]);
         self.rebuild_frame_bind_group(device);
         self.background_source_id = background_id;
         self.environment_source_id = environment_id;
@@ -4858,15 +4819,6 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                         }
                     }
                 }
-                // Transparent hatches blend over the lines already drawn; the
-                // lines in front of them still win the depth test.
-                if !self.skip_hatch_frame {
-                    self.hatch_translucent_gpu.draw(
-                        &mut pass,
-                        &self.uniform_bind_group,
-                        stencil_ref,
-                    );
-                }
             }
 
             // ── Pass 5c: SDF text quads (drawn over wires) ────────────────────
@@ -5122,7 +5074,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     multiview_mask: None,
                 });
                 pass.set_viewport(raster.x, raster.y, raster.width, raster.height, 0.0, 1.0);
-                pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 pass.set_stencil_reference(stencil_ref);
                 if !self.gpu_selected_wires.is_empty() {
                     pass.set_pipeline(if occluded {
@@ -5162,7 +5114,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     } else {
                         &self.circle_xray_pipeline
                     });
-                    pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
+                    pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                     for cg in &self.gpu_selected_circles {
                         if cg.instance_count > 0 {
                             pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
@@ -5176,7 +5128,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     } else {
                         &self.ellipse_xray_pipeline
                     });
-                    pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
+                    pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                     for eg in &self.gpu_selected_ellipses {
                         if eg.instance_count > 0 {
                             pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
@@ -5359,7 +5311,6 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.gpu_preview_circles.clear();
         self.gpu_preview_ellipses.clear();
         self.hatch_gpu.clear();
-        self.hatch_translucent_gpu.clear();
         self.gpu_wipeouts.clear();
         self.wipeout_skip_flags.clear();
         self.gpu_images.clear();
@@ -5645,19 +5596,21 @@ impl MultiPipeline {
                     || std::sync::Arc::strong_count(&entry.1) > 1
                     || std::sync::Arc::strong_count(&entry.3) > 1
             });
-            // Block records are host memory a released slot no longer needs;
-            // the next build re-emits what it still draws.
-            self.block_geometry.clear();
+            self.block_geometry.retain(|_, chunks| {
+                chunks
+                    .iter()
+                    .any(|chunk| std::sync::Arc::strong_count(&chunk.bind_group) > 1)
+            });
         }
         released
     }
 
     /// Sum across slots, plus the caches held once for all of them.
     pub(crate) fn gpu_live_bytes(&self) -> GpuLiveBytes {
-        let mut total = GpuLiveBytes::default();
-        // Block arenas belong to the batches, and a cached build hands the same
-        // arenas to several slots, so each one is counted once.
-        let mut counted = rustc_hash::FxHashSet::default();
+        let mut total = GpuLiveBytes {
+            block_geometry: wire_gpu::block_geometry_bytes(&self.block_geometry),
+            ..Default::default()
+        };
         for inner in &self.inners {
             let slot = inner.gpu_live_bytes();
             total.slots += slot.slots;
@@ -5665,12 +5618,6 @@ impl MultiPipeline {
             total.render_targets += slot.render_targets;
             total.text_atlas += slot.text_atlas;
             total.wire_arena += slot.wire_arena;
-            total.block_geometry +=
-                wire_gpu::block_arena_bytes(&inner.gpu_block_wires, &mut counted)
-                    + wire_gpu::block_arena_bytes(&inner.gpu_selected_block_wires, &mut counted);
-        }
-        for entry in self.wire_buffer_cache.values() {
-            total.block_geometry += wire_gpu::block_arena_bytes(&entry.1, &mut counted);
         }
         total
     }
@@ -5682,23 +5629,16 @@ impl MultiPipeline {
 /// the six-per-segment geometry in slot 0 and the placements in slot 1, while
 /// storage has no geometry vertex buffer at all and the placements become slot
 /// 0. Both draw loops go through here so they cannot drift apart.
-/// Many definitions share one arena, so the batch addresses its own slice of
-/// it: a dynamic offset for its constants, `first_vertex` for its segments and
-/// `first_instance` for its placements.
 fn bind_and_draw_block_wire(pass: &mut wgpu::RenderPass<'_>, wire: &wire_gpu::BlockWireGpu) {
-    let arena = wire.arena.as_ref();
-    pass.set_bind_group(1, arena.bind_group.as_ref(), &[wire.const_offset]);
-    match &arena.vertex_buffer {
+    pass.set_bind_group(1, wire.const_bind_group.as_ref(), &[]);
+    match &wire.vertex_buffer {
         Some(vertices) => {
             pass.set_vertex_buffer(0, vertices.slice(..));
-            pass.set_vertex_buffer(1, arena.instance_buffer.slice(..));
+            pass.set_vertex_buffer(1, wire.instance_buffer.slice(..));
         }
-        None => pass.set_vertex_buffer(0, arena.instance_buffer.slice(..)),
+        None => pass.set_vertex_buffer(0, wire.instance_buffer.slice(..)),
     }
-    pass.draw(
-        wire.first_vertex..wire.first_vertex + wire.vertex_count,
-        wire.first_instance..wire.first_instance + wire.instance_count,
-    );
+    pass.draw(0..wire.vertex_count, 0..wire.instance_count);
 }
 
 /// A square `Depth32Float` render target for the shadow pass. `side` is 1 for

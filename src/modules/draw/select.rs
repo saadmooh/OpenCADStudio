@@ -41,11 +41,6 @@ pub struct SelectObjectsCommand {
     /// The command works on associative dimensions only; the host drops
     /// everything else from each completed selection.
     associative_dimensions_only: bool,
-    /// The kinds of object the command takes; the host drops the rest of
-    /// each completed selection silently, and Enter on nothing ends quietly.
-    keep: Option<fn(&codec::EntityType) -> bool>,
-    /// A SEttings keyword at the prompt, and what it does.
-    settings: Option<fn() -> CmdResult>,
 }
 
 impl SelectObjectsCommand {
@@ -62,8 +57,6 @@ impl SelectObjectsCommand {
             auto_constrain_settings: false,
             prompt_text: None,
             associative_dimensions_only: false,
-            keep: None,
-            settings: None,
         }
     }
 
@@ -81,8 +74,6 @@ impl SelectObjectsCommand {
             auto_constrain_settings: false,
             prompt_text: None,
             associative_dimensions_only: false,
-            keep: None,
-            settings: None,
         }
     }
 
@@ -100,8 +91,6 @@ impl SelectObjectsCommand {
             auto_constrain_settings: false,
             prompt_text: None,
             associative_dimensions_only: false,
-            keep: None,
-            settings: None,
         }
     }
 
@@ -119,8 +108,6 @@ impl SelectObjectsCommand {
             auto_constrain_settings: false,
             prompt_text: None,
             associative_dimensions_only: false,
-            keep: None,
-            settings: None,
         }
     }
 
@@ -144,31 +131,6 @@ impl SelectObjectsCommand {
         command
     }
 
-    /// The command's own wording, keeping only what `keep` accepts.
-    pub fn filtered(
-        prompt_cmd: &str,
-        pending_cmd: &str,
-        prompt_text: &'static str,
-        keep: fn(&codec::EntityType) -> bool,
-    ) -> Self {
-        let mut command = Self::with_prompt(prompt_cmd, pending_cmd, prompt_text);
-        command.keep = Some(keep);
-        command
-    }
-
-    /// The command's own wording with a SEttings keyword; Enter on nothing
-    /// ends quietly.
-    pub fn with_settings(
-        prompt_cmd: &str,
-        pending_cmd: &str,
-        prompt_text: &'static str,
-        settings: fn() -> CmdResult,
-    ) -> Self {
-        let mut command = Self::filtered(prompt_cmd, pending_cmd, prompt_text, |_| true);
-        command.settings = Some(settings);
-        command
-    }
-
     pub fn auto_constrain(pending_cmd: &str) -> Self {
         let mut command = Self::new(pending_cmd);
         command.auto_constrain_settings = true;
@@ -177,10 +139,6 @@ impl SelectObjectsCommand {
 }
 
 impl CadCommand for SelectObjectsCommand {
-    fn reveals_hidden_block_objects(&self) -> bool {
-        self.pending_cmd == "_BVSHOW"
-    }
-
     fn name(&self) -> &'static str {
         "SELECT"
     }
@@ -245,10 +203,6 @@ impl CadCommand for SelectObjectsCommand {
         self.associative_dimensions_only
     }
 
-    fn selection_entity_filter(&self) -> Option<fn(&codec::EntityType) -> bool> {
-        self.keep
-    }
-
     fn selection_drops_locked_point_clouds(&self) -> bool {
         matches!(
             self.pending_cmd.as_str(),
@@ -265,9 +219,6 @@ impl CadCommand for SelectObjectsCommand {
     // they work typed as well — these buttons only surface them, which is what
     // the on-screen keyboard-less case needs.
     fn options(&self) -> Vec<CmdOption> {
-        if self.settings.is_some() && self.pick.is_none() {
-            return vec![CmdOption::new("SEttings", "SE")];
-        }
         if self.commit_on_enter && self.show_options {
             if self.auto_constrain_settings {
                 return vec![CmdOption::new(t!("Settings").as_ref(), "S")];
@@ -323,12 +274,6 @@ impl CadCommand for SelectObjectsCommand {
         if !self.commit_on_enter {
             return None;
         }
-        let word = text.trim().trim_start_matches('_').to_uppercase();
-        if let Some(settings) = self.settings {
-            if word.len() >= 2 && "SETTINGS".starts_with(word.as_str()) {
-                return Some(settings());
-            }
-        }
         match text.trim().to_uppercase().as_str() {
             "S" | "SETTINGS" if self.auto_constrain_settings => {
                 Some(CmdResult::OpenAutoConstrainSettings)
@@ -375,9 +320,6 @@ impl CadCommand for SelectObjectsCommand {
             }
             return CmdResult::NeedPoint;
         }
-        if self.keep.is_some() && self.handles.is_empty() {
-            return CmdResult::Relaunch(std::mem::take(&mut self.pending_cmd), Vec::new());
-        }
         if !self.commit_on_enter || self.handles.is_empty() {
             return CmdResult::Cancel;
         }
@@ -411,7 +353,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "GROUP",
         "LAYFRZ",
         "LAYLCK",
-        "LAYCUR",
         "LAYMCUR",
         "LAYOFF",
         "LAYULK",
@@ -419,7 +360,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "MOVE",
         "ROTATE",
         "SCALE",
-        "STRETCH",
-        "TXTEXP"
+        "STRETCH"
     ]
 }); // SelectObjectsCommand

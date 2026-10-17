@@ -27,14 +27,7 @@ fn main() -> iced::Result {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use clap::Parser;
-        // `/b script.scr`, the startup switch shortcuts carry, is `--script`.
-        let args = cli::Cli::parse_from(std::env::args_os().map(|arg| {
-            if arg == "/b" || arg == "/B" {
-                "--script".into()
-            } else {
-                arg
-            }
-        }));
+        let args = cli::Cli::parse();
 
         // GPU probe child: exercise one backend offscreen, print one JSON
         // line on success and exit 0/1. This must run before any logging/GUI

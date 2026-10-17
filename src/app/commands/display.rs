@@ -500,11 +500,6 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::ToggleProperties));
             }
 
-            // ── GRAPHICATTRIBUTES — toggle Graphic Attributes palette ───────────
-            "GRAPHICATTRIBUTES" => {
-                return Some(Task::done(Message::ToggleGraphicAttributes));
-            }
-
             // ── FILETAB — toggle file/document tabs ──────────────────────────────
             "FILETAB" => {
                 return Some(Task::done(Message::ToggleFileTabs));
@@ -618,19 +613,9 @@ impl OpenCADStudio {
             "CLEANSCREEN" => {
                 return Some(Task::done(Message::ToggleCleanScreen));
             }
-            // ── RIBBON / RIBBONCLOSE — show or hide the ribbon ───────────────────
-            "RIBBON" | "RIBBONCLOSE" => {
-                self.ribbon_closed = cmd == "RIBBONCLOSE";
-                self.persist_settings_if_changed();
-            }
             // ── QUICKPROPERTIES — toggle the floating quick-properties readout ───
             "QUICKPROPERTIES" => {
                 return Some(Task::done(Message::ToggleQuickProperties));
-            }
-
-            "BAUTHORPALETTE" | "BAUTHORPALETTECLOSE" => {
-                let open = cmd == "BAUTHORPALETTE" && !self.show_authoring_palettes;
-                return Some(self.dock_set_open(crate::ui::dock::PanelId::AuthoringPalettes, open));
             }
 
             // ── TOOLPALETTES — not yet implemented ───────────────────────────────
@@ -945,11 +930,6 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::StlExport));
             }
 
-            // FBXEXPORT — export 3D meshes to FBX for visualisation tools
-            "FBXEXPORT" | "EXPORTFBX" => {
-                return Some(Task::done(Message::FbxExport));
-            }
-
             // STEPOUT — export 3D meshes to STEP AP203 format
             "STEPOUT" | "EXPORTSTEP" | "STPOUT" => {
                 return Some(Task::done(Message::StepExport));
@@ -966,9 +946,7 @@ impl OpenCADStudio {
             "PLOT" | "PRINT" => {
                 return Some(Task::done(Message::PlotDialogOpen));
             }
-            // PUBLISH: the layouts of the drawing, each with its own page
-            // setup, into one multi-page PDF or to the printer.
-            "PRINTALL" | "PUBLISH" => {
+            "PRINTALL" => {
                 return Some(Task::done(Message::PrintAllOpen));
             }
             // PRINTERS — what the system reports about printing, on the
@@ -989,18 +967,7 @@ impl OpenCADStudio {
                     self.command_line.push_output(&line);
                 }
             }
-            "EXPORT" => {
-                return Some(Task::done(Message::PlotExport));
-            }
-            "EXPORTPDF" => {
-                self.plot_dialog.file_svg = false;
-                return Some(Task::done(Message::PlotExport));
-            }
-            // EXPORTSVG — the same direct export, but the save dialog
-            // proposes the SVG device's defaults (`stem.svg`).
-            "EXPORTSVG" => {
-                self.plot_dialog.to_file = true;
-                self.plot_dialog.file_svg = true;
+            "EXPORT" | "EXPORTPDF" => {
                 return Some(Task::done(Message::PlotExport));
             }
             // PLOTSTYLE — load or clear CTB/STB plot style table
@@ -1396,154 +1363,101 @@ impl OpenCADStudio {
                 return Some(Task::none());
             }
 
-            // IMAGEADJUST: chosen images (pickfirst first), then the dialog.
-            "IMAGEADJUST" => {
-                let keep = crate::modules::insert::xadjust::keeps("I");
-                let chosen: Vec<codec::Handle> = self.tabs[i]
+            // ADJUST — set brightness / contrast / fade on selected raster images
+            //   ADJUST BRIGHTNESS|CONTRAST|FADE <0-100>
+            "ADJUST" => {
+                use crate::command::SelectThenKeywordCommand;
+                let has_sel = !self.tabs[i].scene.selected_entities().is_empty();
+                let c = SelectThenKeywordCommand::new(
+                    "ADJUST",
+                    "ADJUST  [Brightness / Contrast / Fade]:",
+                    vec![
+                        (
+                            "Brightness",
+                            "BRIGHTNESS",
+                            Some("ADJUST  brightness 0-100:"),
+                        ),
+                        ("Contrast", "CONTRAST", Some("ADJUST  contrast 0-100:")),
+                        ("Fade", "FADE", Some("ADJUST  fade 0-100:")),
+                    ],
+                    has_sel,
+                );
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            cmd if cmd.starts_with("ADJUST ") => {
+                let rest = cmd.trim_start_matches("ADJUST").trim();
+                let parts: Vec<&str> = rest.splitn(2, char::is_whitespace).collect();
+                let action = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                let arg = parts.get(1).copied().unwrap_or("").trim();
+                let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
-                    .into_iter()
-                    .filter(|(_, e)| keep(e))
-                    .map(|(h, _)| h)
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
-                if chosen.is_empty() {
-                    self.tabs[i].scene.deselect_all();
-                    self.refresh_properties();
-                    let command = crate::modules::draw::select::SelectObjectsCommand::filtered(
-                        "IMAGEADJUST",
-                        "_IMAGEADJUSTSEL",
-                        crate::modules::insert::xadjust::select_prompt("I"),
-                        keep,
+                if handles.is_empty() {
+                    self.command_line
+                        .push_error(crate::t!("ADJUST: select raster image(s) first.").as_ref());
+                } else if action.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!("Usage: ADJUST BRIGHTNESS|CONTRAST|FADE <0-100>").as_ref(),
                     );
-                    use crate::command::CadCommand;
-                    self.command_line.push_info(&command.prompt());
-                    self.command_line.set_step_options(command.options());
-                    self.tabs[i].active_cmd = Some(Box::new(command));
+                } else if let Ok(v) = arg.parse::<u8>() {
+                    let v = v.min(100);
+                    self.push_undo_snapshot(i, "ADJUST");
+                    let mut changed = 0usize;
+                    let mut changed_handles = Vec::new();
+                    for h in &handles {
+                        if let Some(codec::EntityType::RasterImage(img)) = self.tabs[i]
+                            .scene
+                            .document
+                            .entities_mut()
+                            .find(|e| e.common().handle == *h)
+                        {
+                            match action.as_str() {
+                                "BRIGHTNESS" => {
+                                    img.brightness = v;
+                                    changed += 1;
+                                    changed_handles.push(*h);
+                                }
+                                "CONTRAST" => {
+                                    img.contrast = v;
+                                    changed += 1;
+                                    changed_handles.push(*h);
+                                }
+                                "FADE" => {
+                                    img.fade = v;
+                                    changed += 1;
+                                    changed_handles.push(*h);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    if changed > 0 {
+                        self.tabs[i].dirty = true;
+                        for &handle in &changed_handles {
+                            self.tabs[i].scene.reseed_derived_caches(handle);
+                        }
+                        let changes: Vec<_> = changed_handles
+                            .into_iter()
+                            .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                            .collect();
+                        self.tabs[i].scene.bump_entities(&changes);
+                        self.command_line.push_output(
+                            crate::tf!("ADJUST: {action} = {v} on {changed} image(s).").as_ref(),
+                        );
+                    } else {
+                        self.command_line.push_error(
+                            crate::t!("ADJUST: no raster images selected, or unknown property (use BRIGHTNESS|CONTRAST|FADE).").as_ref(),
+                        );
+                    }
                 } else {
-                    self.tabs[i]
-                        .scene
-                        .replace_selection(chosen.into_iter().collect());
-                    return Some(self.dispatch_command("_IMAGEADJUSTSEL"));
+                    self.command_line
+                        .push_error(crate::t!("ADJUST: value must be 0-100.").as_ref());
                 }
-            }
-            "_IMAGEADJUSTSEL" => {
-                self.open_image_adjust(i);
-                return Some(self.finish_dispatch("IMAGEADJUST"));
-            }
-            // ADJUST / -IMAGEADJUST / PDFADJUST / DWFADJUST / DGNADJUST:
-            // chosen images or underlays (pickfirst first), then the option
-            // and the value.
-            "ADJUST" | "-IMAGEADJUST" | "PDFADJUST" | "DWFADJUST" | "DGNADJUST" => {
-                let mode = match cmd {
-                    "-IMAGEADJUST" => "I",
-                    "PDFADJUST" => "P",
-                    "DWFADJUST" => "W",
-                    "DGNADJUST" => "G",
-                    _ => "A",
-                };
-                let keep = crate::modules::insert::xadjust::keeps(mode);
-                let chosen: Vec<codec::Handle> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .filter(|(_, e)| keep(e))
-                    .map(|(h, _)| h)
-                    .collect();
-                if !chosen.is_empty() {
-                    self.tabs[i]
-                        .scene
-                        .replace_selection(chosen.into_iter().collect());
-                    return Some(self.dispatch_command(&format!("_ADJUSTSEL {mode}")));
-                }
-                self.start_adjust_selection(i, cmd, mode);
-            }
-            // The gathered objects: one kind at a time, then the option.
-            c if c.starts_with("_ADJUSTSEL ") => {
-                use crate::command::CadCommand;
-                use crate::modules::insert::xadjust::{self, AdjustCommand};
-                let mode = c["_ADJUSTSEL ".len()..].trim().to_string();
-                let keep = xadjust::keeps(&mode);
-                let name = xadjust::command_name(&mode);
-                let objects: Vec<(codec::Handle, codec::EntityType)> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .filter(|(h, e)| keep(e) && !self.tabs[i].scene.is_layer_locked(*h))
-                    .map(|(h, e)| (h, e.clone()))
-                    .collect();
-                match AdjustCommand::for_objects(&objects) {
-                    None => {}
-                    Some(Err(message)) => {
-                        self.command_line.push_error(crate::t!(message).as_ref());
-                        self.start_adjust_selection(i, name, &mode);
-                    }
-                    Some(Ok(command)) => {
-                        self.command_line.push_info(&command.prompt());
-                        self.command_line.set_step_options(command.options());
-                        self.tabs[i].active_cmd = Some(Box::new(command));
-                    }
-                }
-                // Repeating runs the command, not this step.
-                return Some(self.finish_dispatch(name));
-            }
-            // `_ADJUSTAPPLY <BRIGHTNESS|CONTRAST|FADE|MONOCHROME> <value> <handles…>`
-            // writes the value to every listed image or underlay, one undo step.
-            c if c.starts_with("_ADJUSTAPPLY ") => {
-                let mut parts = c.split_whitespace().skip(1);
-                let prop = parts.next().unwrap_or("").to_string();
-                let value: u8 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-                let handles: Vec<codec::Handle> = parts
-                    .filter_map(|h| u64::from_str_radix(h, 16).ok())
-                    .map(codec::Handle::new)
-                    .collect();
-                self.push_undo_snapshot(i, "ADJUST");
-                let mut changed = Vec::new();
-                for h in &handles {
-                    let done = match self.tabs[i].scene.document.get_entity_mut(*h) {
-                        Some(codec::EntityType::RasterImage(img)) => match prop.as_str() {
-                            "BRIGHTNESS" => {
-                                img.brightness = value;
-                                true
-                            }
-                            "CONTRAST" => {
-                                img.contrast = value;
-                                true
-                            }
-                            "FADE" => {
-                                img.fade = value;
-                                true
-                            }
-                            _ => false,
-                        },
-                        Some(codec::EntityType::Underlay(u)) => match prop.as_str() {
-                            "CONTRAST" => {
-                                u.set_contrast(value);
-                                true
-                            }
-                            "FADE" => {
-                                u.set_fade(value);
-                                true
-                            }
-                            "MONOCHROME" => {
-                                u.set_monochrome(value != 0);
-                                true
-                            }
-                            _ => false,
-                        },
-                        _ => false,
-                    };
-                    if done {
-                        self.tabs[i].scene.reseed_derived_caches(*h);
-                        changed.push((*h, crate::scene::ChangeKind::Modified));
-                    }
-                }
-                if !changed.is_empty() {
-                    self.tabs[i].scene.bump_entities(&changed);
-                    self.tabs[i].dirty = true;
-                }
-                // The command used the set up; nothing stays chosen.
-                self.tabs[i].scene.deselect_all();
-                self.refresh_properties();
             }
 
             // ANNOSCALE / CANNOSCALE <ratio> — set the current annotation scale
@@ -1613,14 +1527,12 @@ impl OpenCADStudio {
                 }
                 self.push_undo_snapshot(i, "ANNOUPDATE");
                 let scale = self.tabs[i].scene.creation_annotation_scale_handle();
-                let paper_to_model = self.tabs[i].scene.creation_annotation_multiplier();
                 let mut updated = 0usize;
                 for handle in &handles {
                     if crate::scene::annotative::update_entity_from_annotation_style(
                         &mut self.tabs[i].scene.document,
                         *handle,
                         scale,
-                        paper_to_model,
                     ) {
                         updated += 1;
                     }
@@ -1871,34 +1783,51 @@ impl OpenCADStudio {
                         .push_info(crate::t!("Usage: DATALINK <path-to-.csv>").as_ref());
                     return Some(Task::none());
                 }
-                // Web: nothing is behind a typed path — pick the .csv through
-                // the browser, read its bytes at pick time, and register them
-                // in the picked-source registry; the same table-insert path
-                // then runs from `DataLinkCsvPicked`.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    // Say the typed argument is superseded — a silent
-                    // redirect looks like the input was lost.
-                    if !path.trim().is_empty() {
-                        self.command_line.push_info(
-                            crate::t!(
-                                "The browser cannot open a typed path; pick the file instead."
-                            )
-                            .as_ref(),
-                        );
-                    }
-                    return Some(Task::perform(
-                        crate::io::pick_datalink_csv_web(),
-                        Message::DataLinkCsvPicked,
-                    ));
-                }
-                #[cfg(not(target_arch = "wasm32"))]
                 match std::fs::read_to_string(path) {
                     Ok(text) => {
+                        let rows_data = parse_csv_table(&text);
+                        let nrows = rows_data.len();
+                        let ncols = rows_data.iter().map(|r| r.len()).max().unwrap_or(0);
+                        if nrows == 0 || ncols == 0 {
+                            self.command_line
+                                .push_error(crate::t!("DATALINK: the CSV file is empty.").as_ref());
+                            return Some(Task::none());
+                        }
+                        use codec::entities::TableBuilder;
+                        use codec::types::Vector3;
+                        let mut table = TableBuilder::new(nrows, ncols)
+                            .at(Vector3::new(0.0, 0.0, 0.0))
+                            .row_height(0.5)
+                            .column_width(2.0)
+                            .build();
+                        for (r, row) in rows_data.iter().enumerate() {
+                            for (c, cell) in row.iter().enumerate() {
+                                table.set_cell_text(r, c, cell);
+                            }
+                        }
+                        let doc = &self.tabs[i].scene.document;
+                        let current_style = doc.header.current_table_style_name.clone();
+                        table.table_style_handle =
+                            doc.objects
+                                .iter()
+                                .find_map(|(handle, object)| match object {
+                                    codec::objects::ObjectType::TableStyle(style)
+                                        if style.name.eq_ignore_ascii_case(&current_style) =>
+                                    {
+                                        Some(*handle)
+                                    }
+                                    _ => None,
+                                });
                         let link_path = std::fs::canonicalize(path)
                             .map(|value| value.to_string_lossy().into_owned())
                             .unwrap_or_else(|_| path.to_string());
-                        self.place_data_link_table(&text, &link_path);
+                        let command =
+                            crate::modules::annotate::data_link::DataLinkPlaceCommand::new(
+                                table, &link_path,
+                            );
+                        self.command_line
+                            .push_info(&crate::command::CadCommand::prompt(&command));
+                        self.tabs[i].active_cmd = Some(Box::new(command));
                     }
                     Err(e) => {
                         self.command_line.push_error(
@@ -2121,7 +2050,7 @@ impl OpenCADStudio {
                 }
             }
 
-            "ULAYERS" => self.open_underlay_layers_dialog(i),
+            "UNDERLAYLAYERS" | "ULAYERS" => self.open_underlay_layers_dialog(i),
             "RECAP" | "SYNCPVIEWPORTS" => {
                 self.command_line
                     .push_info(crate::tf!("{cmd}: not yet implemented.").as_ref());
@@ -2130,52 +2059,6 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
-    }
-
-    /// Build the linked table from CSV text and start the placement command —
-    /// the shared tail of the native typed-path `DATALINK` read and the web
-    /// picker's `DataLinkCsvPicked` (which registers the picked bytes in the
-    /// picked-source registry first so the link re-reads in-session).
-    pub(in crate::app) fn place_data_link_table(&mut self, csv_text: &str, link_path: &str) {
-        let i = self.active_tab;
-        let rows_data = parse_csv_table(csv_text);
-        let nrows = rows_data.len();
-        let ncols = rows_data.iter().map(|r| r.len()).max().unwrap_or(0);
-        if nrows == 0 || ncols == 0 {
-            self.command_line
-                .push_error(crate::t!("DATALINK: the CSV file is empty.").as_ref());
-            return;
-        }
-        use codec::entities::TableBuilder;
-        use codec::types::Vector3;
-        let mut table = TableBuilder::new(nrows, ncols)
-            .at(Vector3::new(0.0, 0.0, 0.0))
-            .row_height(0.5)
-            .column_width(2.0)
-            .build();
-        for (r, row) in rows_data.iter().enumerate() {
-            for (c, cell) in row.iter().enumerate() {
-                table.set_cell_text(r, c, cell);
-            }
-        }
-        let doc = &self.tabs[i].scene.document;
-        let current_style = doc.header.current_table_style_name.clone();
-        table.table_style_handle = doc
-            .objects
-            .iter()
-            .find_map(|(handle, object)| match object {
-                codec::objects::ObjectType::TableStyle(style)
-                    if style.name.eq_ignore_ascii_case(&current_style) =>
-                {
-                    Some(*handle)
-                }
-                _ => None,
-            });
-        let command =
-            crate::modules::annotate::data_link::DataLinkPlaceCommand::new(table, link_path);
-        self.command_line
-            .push_info(&crate::command::CadCommand::prompt(&command));
-        self.tabs[i].active_cmd = Some(Box::new(command));
     }
 }
 
@@ -2275,113 +2158,6 @@ pub(crate) fn table_to_csv(table: &codec::entities::Table) -> String {
         })
         .collect::<Vec<_>>()
         .join("\r\n")
-}
-
-impl OpenCADStudio {
-    /// The ADJUST family's object prompt, keeping only the kinds `mode`
-    /// takes (see `xadjust::keeps`).
-    fn start_adjust_selection(&mut self, i: usize, name: &str, mode: &str) {
-        use crate::command::CadCommand;
-        use crate::modules::insert::xadjust;
-        self.tabs[i].scene.deselect_all();
-        self.refresh_properties();
-        let command = crate::modules::draw::select::SelectObjectsCommand::filtered(
-            name,
-            &format!("_ADJUSTSEL {mode}"),
-            xadjust::select_prompt(mode),
-            xadjust::keeps(mode),
-        );
-        self.command_line.push_info(&command.prompt());
-        self.command_line.set_step_options(command.options());
-        self.tabs[i].active_cmd = Some(Box::new(command));
-    }
-
-    /// The Image Adjust dialog for the chosen images, starting from the
-    /// first one's values; nothing opens without an image.
-    fn open_image_adjust(&mut self, i: usize) {
-        let keep = crate::modules::insert::xadjust::keeps("I");
-        let scene = &self.tabs[i].scene;
-        let images: Vec<(codec::Handle, codec::EntityType)> = scene
-            .selected_entities()
-            .into_iter()
-            .filter(|(h, e)| keep(e) && !scene.is_layer_locked(*h))
-            .map(|(h, e)| (h, e.clone()))
-            .collect();
-        let Some((_, codec::EntityType::RasterImage(first))) = images.first() else {
-            return;
-        };
-        let canvas = scene.bg_color;
-        let state = crate::ui::window::pdf_dialogs::ImageAdjustState::new(
-            images.iter().map(|(h, _)| *h).collect(),
-            &first.file_path,
-            [first.brightness, first.contrast, first.fade],
-            [0, 1, 2].map(|k| (canvas[k].clamp(0.0, 1.0) * 255.0).round() as u8),
-        );
-        self.image_adjust = Some(state);
-        self.active_modal = Some(crate::app::ModalKind::ImageAdjust);
-    }
-
-    pub(in crate::app) fn update_image_adjust(
-        &mut self,
-        message: crate::ui::window::pdf_dialogs::PdfDialogMsg,
-    ) -> Task<Message> {
-        use crate::ui::window::pdf_dialogs::{PdfDialogMsg as M, IMAGE_ADJUST_DEFAULTS};
-        let i = self.active_tab;
-        let Some(state) = self.image_adjust.as_mut() else {
-            return Task::none();
-        };
-        match message {
-            M::IaValue(row, value) => state.set(row as usize, value),
-            M::IaStep(row, dir) => {
-                let k = row as usize;
-                state.set(k, state.values[k].saturating_add_signed(dir.signum()));
-            }
-            // A box takes whole numbers 0–100 only; anything else is not
-            // typed in. An emptied box keeps the value until a number comes.
-            M::IaText(row, typed) => {
-                let k = row as usize;
-                let typed = typed.trim().to_string();
-                if typed.is_empty() {
-                    state.texts[k] = typed;
-                } else if let Some(value) = typed
-                    .parse::<u8>()
-                    .ok()
-                    .filter(|v| *v <= 100 && typed.chars().all(|c| c.is_ascii_digit()))
-                {
-                    state.set(k, value);
-                }
-            }
-            M::IaReset => state.set_all(IMAGE_ADJUST_DEFAULTS),
-            M::IaApply => {
-                let Some(state) = self.image_adjust.take() else {
-                    return Task::none();
-                };
-                self.close_active_modal();
-                let [brightness, contrast, fade] = state.values;
-                self.push_undo_snapshot(i, "IMAGEADJUST");
-                let mut changed = Vec::new();
-                for h in &state.handles {
-                    if let Some(codec::EntityType::RasterImage(img)) =
-                        self.tabs[i].scene.document.get_entity_mut(*h)
-                    {
-                        img.brightness = brightness;
-                        img.contrast = contrast;
-                        img.fade = fade;
-                        self.tabs[i].scene.reseed_derived_caches(*h);
-                        changed.push((*h, crate::scene::ChangeKind::Modified));
-                    }
-                }
-                if !changed.is_empty() {
-                    self.tabs[i].scene.bump_entities(&changed);
-                    self.tabs[i].dirty = true;
-                }
-                self.tabs[i].scene.deselect_all();
-                self.refresh_properties();
-            }
-            _ => {}
-        }
-        Task::none()
-    }
 }
 
 #[cfg(test)]
@@ -2549,7 +2325,6 @@ mod tests {
             instance_transform: None,
             instance_handle: None,
             instance_color: None,
-            edge_color: None,
             instance_aabb: None,
         }
     }

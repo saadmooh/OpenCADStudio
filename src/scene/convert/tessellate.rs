@@ -1808,12 +1808,10 @@ pub fn tessellate(
                         depth_override: None,
                         display_visible: true,
                         snap_only: false,
-                        reference_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
                         render_instance: None,
-                        stub: None,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
@@ -1975,12 +1973,10 @@ pub fn tessellate(
                         depth_override: None,
                         display_visible: true,
                         snap_only: false,
-                        reference_only: false,
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
                         render_instance: None,
-                        stub: None,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
@@ -2162,12 +2158,10 @@ pub fn tessellate(
                 let mut out = Vec::new();
                 let mut is_first = true;
 
-                // A thickened wide polyline's extrusion — its corner / cap
-                // edges frame the solid tube and read black (like
-                // solid-with-edges outlines), while the tube fill keeps the
-                // entity colour. A thickened polyline without width has no
-                // fill, so its edges are all there is and keep the entity
-                // colour.
+                // A thickened polyline's extrusion — its corner / cap edges
+                // frame the solid tube and read black (like solid-with-edges
+                // outlines), while the tube fill keeps the entity colour. Both
+                // wide polyline kinds (LwPolyline + Polyline2D) extrude tubes.
                 let is_thick_extrusion = matches!(
                     entity,
                     EntityType::LwPolyline(p) if p.thickness.abs() > 1e-10
@@ -2175,7 +2169,7 @@ pub fn tessellate(
                     entity,
                     EntityType::Polyline2D(p) if p.thickness.abs() > 1e-10
                 );
-                let edge_color = if is_thick_extrusion && polyline_max_width(entity) > 1e-9 {
+                let edge_color = if is_thick_extrusion {
                     [0.0, 0.0, 0.0, 1.0]
                 } else {
                     color
@@ -2460,7 +2454,11 @@ pub fn tessellate(
                     .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
 
                 if has_arc && can_split {
-                    let edge_color = color;
+                    let edge_color = if is_thick_extrusion {
+                        [0.0, 0.0, 0.0, 1.0]
+                    } else {
+                        color
+                    };
                     let point_marker =
                         crate::entities::point::relative_marker_spec(entity, document);
                     let seg_widths = polyline_segment_widths(entity);
@@ -2803,11 +2801,10 @@ fn builtin_arrow_from_block_name(name: &str, dimasz: f32) -> Option<ArrowKind> {
             filled: false,
             size_mul: 1.0,
         }),
-        // `_Small` is the reference's "Dot small blank": a circle half the
-        // arrow size across.
-        "SMALL" => Some(ArrowKind::Dot {
-            size: dimasz * 0.5,
-            filled: false,
+        "SMALL" => Some(ArrowKind::Triangle {
+            size: dimasz,
+            filled: true,
+            size_mul: 0.5,
         }),
         "OPEN" => Some(ArrowKind::Open {
             size: dimasz,
@@ -3198,32 +3195,30 @@ pub(crate) fn entity_z(entity: &EntityType) -> f32 {
 
 /// Shader band width, or zero while FILLMODE draws the kernel boundary.
 fn polyline_band_width(entity: &EntityType, fill_mode: bool) -> f32 {
-    let thick = match entity {
-        EntityType::LwPolyline(p) => p.thickness.abs() > 1e-10,
-        EntityType::Polyline2D(p) => p.thickness.abs() > 1e-10,
-        _ => true,
+    if !fill_mode {
+        return 0.0;
+    }
+    let w = match entity {
+        EntityType::LwPolyline(p) if p.thickness.abs() <= 1e-10 => {
+            let mut w = p.constant_width;
+            for v in &p.vertices {
+                w = w.max(v.start_width).max(v.end_width);
+            }
+            w
+        }
+        EntityType::Polyline2D(p) if p.thickness.abs() <= 1e-10 => {
+            let mut w = p.start_width.max(p.end_width);
+            for v in &p.vertices {
+                w = w.max(v.start_width).max(v.end_width);
+            }
+            w
+        }
+        _ => 0.0,
     };
-    let w = polyline_max_width(entity);
-    if fill_mode && !thick && w > 1e-9 {
+    if w > 1e-9 {
         w as f32
     } else {
         0.0
-    }
-}
-
-/// The widest start / end width of a 2-D polyline (0 for other entities).
-fn polyline_max_width(entity: &EntityType) -> f64 {
-    match entity {
-        EntityType::LwPolyline(p) => p.vertices.iter().fold(p.constant_width, |w, v| {
-            w.max(v.start_width).max(v.end_width)
-        }),
-        EntityType::Polyline2D(p) => p
-            .vertices
-            .iter()
-            .fold(p.start_width.max(p.end_width), |w, v| {
-                w.max(v.start_width).max(v.end_width)
-            }),
-        _ => 0.0,
     }
 }
 

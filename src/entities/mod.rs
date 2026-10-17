@@ -1,5 +1,4 @@
 pub mod arc;
-pub(crate) mod arrowheads;
 pub mod attribute;
 pub mod circle;
 pub mod common;

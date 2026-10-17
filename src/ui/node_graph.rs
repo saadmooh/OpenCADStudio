@@ -152,7 +152,7 @@ impl ObjectKind {
                 EntityType::Text(e::Text::with_value("Text", origin).with_height(2.5))
             }
             ObjectKind::MText => {
-                EntityType::MText(Box::new(e::MText::with_value("MText", origin).with_height(2.5)))
+                EntityType::MText(e::MText::with_value("MText", origin).with_height(2.5))
             }
         }
     }
@@ -658,7 +658,7 @@ impl Graph {
     /// The node library as a docked panel: title bar, a search box with the
     /// graph's New / Open / Save beside it, then the categories. Entries are
     /// clicked or dragged onto the canvas.
-    pub fn panel(&self, width: f32, chrome: crate::ui::dock::Chrome) -> Element<'_, Message> {
+    pub fn panel(&self, width: f32, auto_collapse: bool) -> Element<'_, Message> {
         use crate::ui::dock::{self, PanelId};
         let tool = |icon: &'static [u8], tip: &str, message: GraphMsg| {
             dock::tool_button(
@@ -740,8 +740,16 @@ impl Graph {
         .height(Length::Fill);
 
         dock::frame(
-            dock::title_bar(PanelId::NodeGraph, t!("Node Graph").into_owned(), chrome),
-            column![toolbar, body].spacing(6),
+            column![
+                dock::title_bar(
+                    PanelId::NodeGraph,
+                    t!("Node Graph").into_owned(),
+                    auto_collapse
+                ),
+                toolbar,
+                body
+            ]
+            .spacing(6),
             width,
         )
     }

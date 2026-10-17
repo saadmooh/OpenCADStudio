@@ -44,3 +44,14 @@ __pycache__/
 
 # macOS Finder metadata
 .DS_Store
+
+# Plugins directory excluded from main repository
+plugins/
+
+# Logs and temporary files
+*.log
+*.sv$
+*.bak
+err.txt
+out.txt
+scratch/

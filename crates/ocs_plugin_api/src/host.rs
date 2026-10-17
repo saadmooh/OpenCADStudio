@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::manifest::{EntityClasses, PluginManifest};
+use crate::manifest::PluginManifest;
 use crate::ribbon::CadModule;
 
 // Re-export the opencadcodec crate and the types that appear in the HostApi trait
@@ -396,15 +396,6 @@ pub enum HostNotification {
         tab_id: u64,
         epoch: u64,
     },
-    /// V9 a document became resident in a tab: a whole document replaced the
-    /// tab's previous content — opened from file, created from a template, or
-    /// loaded by an automation/system open. The counterpart of
-    /// [`HostNotification::DocumentTabClosed`]: with both, a plugin can keep
-    /// per-document state (e.g. runtime designations) in sync from load to
-    /// close. Discriminant 10.
-    DocumentOpened {
-        tab_id: u64,
-    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -456,10 +447,6 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, epoch).map_err(serde::ser::Error::custom)?;
             }
-            HostNotification::DocumentOpened { tab_id } => {
-                bytes.push(10);
-                bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
-            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -502,9 +489,6 @@ impl<'de> Deserialize<'de> for HostNotification {
                 .map_err(serde::de::Error::custom),
             9 => bincode::deserialize(rest)
                 .map(|(tab_id, epoch)| HostNotification::DrawingChanged { tab_id, epoch })
-                .map_err(serde::de::Error::custom),
-            10 => bincode::deserialize(rest)
-                .map(|tab_id| HostNotification::DocumentOpened { tab_id })
                 .map_err(serde::de::Error::custom),
             _ => Ok(HostNotification::Unknown(bytes)),
         }
@@ -659,21 +643,6 @@ pub trait BuiltinPlugin: Send + Sync {
     /// Added in API v5. The runner only calls this for plugins that report API
     /// major 5 or newer.
     fn on_load(&mut self, _host: &mut dyn HostApi) {}
-
-    /// Entity-class display declarations (API v10): the XDATA
-    /// class-identity keys the plugin stamps on entities, mapped to the
-    /// display labels the host shows while this plugin is loaded (e.g. the
-    /// Properties panel title becomes `"Linear Element (Line)"`). Display-only
-    /// — the labels never round-trip the drawing and never govern behavior;
-    /// entities carry only the stable identity keys in their XDATA.
-    ///
-    /// The default (`None`) declares no entity classes. The runner only calls
-    /// this for plugins whose exported `ocs_plugin_api_version` symbol reports
-    /// API major 10 or newer, so older cdylibs are never touched past their
-    /// vtable.
-    fn entity_classes(&self) -> Option<&'static EntityClasses> {
-        None
-    }
 }
 
 /// A point-driven interactive command a plugin starts via
@@ -1115,135 +1084,6 @@ pub trait HostApi {
     fn execute_command(&mut self, cmd: &str) -> bool {
         let _ = cmd;
         false
-    }
-
-    // ── XRecord objects (added in API v8; appended at the end to keep vtable
-    // indices stable for older plugins) ────────────────────────────────────────
-
-    /// Create an XRecord named `name` under the dictionary addressed by
-    /// `dictionary_path`, storing `entries` (API v8, additive).
-    ///
-    /// The path is walked from the drawing's named-object dictionary root: an
-    /// empty path addresses the root itself, and missing intermediate
-    /// dictionaries are created, so the first call seeds a plugin's namespace.
-    /// Every refusal (empty or invalid names, a path fragment that names a
-    /// non-dictionary object, a name already in use — comparison is
-    /// case-insensitive like dictionary lookups) happens **before** any change,
-    /// so a failure leaves the drawing untouched. The record is registered in
-    /// its dictionary and owned by it; the returned handle stays stable across
-    /// updates.
-    ///
-    /// Undo composition — the entity-write contract: a mutation performed
-    /// inside a plugin-opened [`HostApi::push_undo`] scope joins that scope,
-    /// so an operation composed of several writes (entities and XRecords) is
-    /// a single undo step under the plugin's own label. With no scope open
-    /// the change is one undo step of its own. Refusals record no undo step.
-    fn create_xrecord(
-        &mut self,
-        _dictionary_path: &[&str],
-        _name: &str,
-        _entries: Vec<XRecordEntry>,
-    ) -> Result<Handle, String> {
-        Err("XRecord creation is not supported by this host".to_owned())
-    }
-
-    /// Read the entries of an existing XRecord by name (API v8, additive).
-    ///
-    /// Resolves `dictionary_path` under the named-object dictionary root and
-    /// returns the record's entries verbatim. Fails when the path, the name or
-    /// the record is missing, or when the name addresses a different object
-    /// kind.
-    fn read_xrecord(
-        &self,
-        _dictionary_path: &[&str],
-        _name: &str,
-    ) -> Result<Vec<XRecordEntry>, String> {
-        Err("XRecord reads are not supported by this host".to_owned())
-    }
-
-    /// Atomically replace the entries of an existing XRecord (API v8,
-    /// additive). Returns the record's handle.
-    ///
-    /// Neither the path nor its dictionaries are created: an update must never
-    /// create anything silently. Identity (handle, owning dictionary) stays;
-    /// the entries and their DWG handle-reference stream are replaced and the
-    /// record's verbatim raw payloads are dropped, so subsequent saves emit the
-    /// new content. A refusal leaves the drawing untouched. Undo composition —
-    /// the entity-write contract: a mutation inside a plugin-opened
-    /// [`HostApi::push_undo`] scope joins that scope; with no scope open it is
-    /// one undo step of its own, whose undo restores the previous entries
-    /// byte-exactly. Refusals record no undo step.
-    fn update_xrecord(
-        &mut self,
-        _dictionary_path: &[&str],
-        _name: &str,
-        _entries: Vec<XRecordEntry>,
-    ) -> Result<Handle, String> {
-        Err("XRecord updates are not supported by this host".to_owned())
-    }
-
-    /// Delete the XRecord named `name` and its dictionary entry (API v8,
-    /// additive). Returns the removed record, so audits keep the prior
-    /// content. A refusal leaves the drawing untouched. Undo composition — the
-    /// entity-write contract: a mutation inside a plugin-opened
-    /// [`HostApi::push_undo`] scope joins that scope; with no scope open it is
-    /// one undo step of its own. Refusals record no undo step.
-    fn delete_xrecord(
-        &mut self,
-        _dictionary_path: &[&str],
-        _name: &str,
-    ) -> Result<XRecord, String> {
-        Err("XRecord deletes are not supported by this host".to_owned())
-    }
-
-    /// List the XRecord names under the dictionary addressed by
-    /// `dictionary_path` (API v8, additive).
-    ///
-    /// Returns only the dictionary keys that address XRecord objects, in the
-    /// dictionary's own order, so consumers can audit and export without
-    /// knowing names in advance. Fails when the path does not address a
-    /// dictionary.
-    fn list_xrecords(&self, _dictionary_path: &[&str]) -> Result<Vec<String>, String> {
-        Err("XRecord listing is not supported by this host".to_owned())
-    }
-
-    // ── Reference-only designation (added in API v9; appended at the end to
-    // keep vtable indices stable for older plugins) ──────────────────────────
-
-    /// Mark (or unmark) an entity as reference-only (API v9, additive).
-    ///
-    /// A reference-only entity is plugin-owned display geometry: it renders
-    /// normally, but the built-in edit paths treat it like an entity on a
-    /// locked layer — it is neither grip-editable nor click-pickable (a click
-    /// passes through to the editable entity underneath), window and box
-    /// selections skip it, and user-driven writes refuse it. The owning
-    /// plugin keeps full write access through this API: `update_entity`,
-    /// [`update_entities_transaction`](HostApi::update_entities_transaction),
-    /// `remove_entity` and the XDATA record methods keep working, so derived
-    /// display geometry can be refreshed in place.
-    ///
-    /// The designation is a scene-scoped, in-memory set keyed by entity
-    /// handle: it is not written to the saved DWG/DXF (the host stores no
-    /// state of its own in the file), it lives and dies with the drawing tab,
-    /// and a reloaded drawing starts undesignated — the owning plugin
-    /// re-marks its entities when
-    /// [`on_notification`](BuiltinPlugin::on_notification) delivers
-    /// [`HostNotification::DocumentOpened`], making the in-memory designation
-    /// fully equivalent to a persisted one for its use case.
-    ///
-    /// Fails when the entity does not exist or is on a locked layer (the same
-    /// policy as the XDATA record methods). A call that would not change the
-    /// current designation succeeds without recording an undo step — and
-    /// without publishing a document change, so idempotent re-marks cannot
-    /// loop with the notification dispatch.
-    ///
-    /// Undo composition — the entity-write contract: a change performed
-    /// inside a plugin-opened [`HostApi::push_undo`] scope joins that scope,
-    /// so an operation composed of several writes is a single undo step under
-    /// the plugin's own label. With no scope open the change is one undo step
-    /// of its own. Refusals record no undo step.
-    fn set_reference_only(&mut self, _handle: Handle, _reference_only: bool) -> Result<(), String> {
-        Err("The reference-only designation is not supported by this host".to_owned())
     }
 }
 

@@ -38,8 +38,6 @@ pub(super) struct ToggleState {
     pub show_ucs_icon: bool,
     pub show_properties: bool,
     pub show_count_palette: bool,
-    pub show_graphic_attributes: bool,
-    pub show_authoring_palettes: bool,
     pub show_block_palette: bool,
     pub show_sheet_set: bool,
     pub show_file_tabs: bool,
@@ -94,14 +92,13 @@ const COMBO_PANEL_PAD: Padding = Padding {
 thread_local! {
     /// Ribbon layout runs on every pointer-driven view update. Cache the font-
     /// measured width per translated label so the automatic sizing stays cheap.
-    /// Tagged with the UI-font generation it was measured with.
-    static LARGE_WIDTH_CACHE: RefCell<(u32, HashMap<String, f32>)> =
-        RefCell::new((0, HashMap::default()));
+    static LARGE_WIDTH_CACHE: RefCell<HashMap<String, f32>> =
+        RefCell::new(HashMap::default());
 }
 
 /// Dropdown items that report a state and cannot be picked.
 pub(super) fn is_disabled_item(cmd: &str) -> bool {
-    matches!(cmd, "FRAMES3" | "UOSNAP2")
+    cmd == "FRAMES3"
 }
 
 fn ribbon_label_bounds(
@@ -174,20 +171,13 @@ fn measure_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
 }
 
 fn automatic_large_width(renderer: &iced::Renderer, label: &str) -> f32 {
-    let generation = crate::sys::ui_font::generation();
-    if let Some(width) = LARGE_WIDTH_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.0 != generation {
-            *cache = (generation, HashMap::default());
-        }
-        cache.1.get(label).copied()
-    }) {
+    if let Some(width) = LARGE_WIDTH_CACHE.with(|cache| cache.borrow().get(label).copied()) {
         return width;
     }
 
     let width = measure_large_width(renderer, label);
     LARGE_WIDTH_CACHE.with(|cache| {
-        cache.borrow_mut().1.insert(label.to_string(), width);
+        cache.borrow_mut().insert(label.to_string(), width);
     });
     width
 }
@@ -380,8 +370,6 @@ pub(super) fn is_active_tool(id: &str, active_tool: &Option<String>, state: &Tog
         "UCSICON" => state.show_ucs_icon,
         "PROPERTIES" => state.show_properties,
         "COUNTLIST" => state.show_count_palette,
-        "GRAPHICATTRIBUTES" => state.show_graphic_attributes,
-        "BAUTHORPALETTE" => state.show_authoring_palettes,
         "BLOCKPALETTE" => state.show_block_palette,
         "SHEETSET" => state.show_sheet_set,
         "FILETAB" => state.show_file_tabs,
@@ -509,8 +497,6 @@ fn tool_description(id: &str) -> Option<&'static str> {
 /// A tool's tooltip: its name, its description when one is known, and the
 /// command it runs.
 fn tool_tip_text(label: &str, id: &str) -> String {
-    // A macro (`PDFIMPORT;FILE`) shows the command it starts.
-    let id = id.split(';').next().unwrap_or(id);
     match tool_description(id) {
         Some(description) => format!("{label}\n{}\n{} {id}", t!(description), t!("Command:")),
         None => format!("{label}\n{} {id}", t!("Command:")),
@@ -555,13 +541,11 @@ pub(super) fn render_small<'a>(
                 .width(Length::Fixed(SMALL_W))
                 .height(ROW_H)
                 .padding([4, 4]);
-            super::keytips::anchor(
-                t.id,
-                tooltip(btn, make_tip(tip_text), TipPos::Right)
-                    .gap(6.0)
-                    .delay(Duration::from_millis(400))
-                    .style(tip_style),
-            )
+            tooltip(btn, make_tip(tip_text), TipPos::Right)
+                .gap(6.0)
+                .delay(Duration::from_millis(400))
+                .style(tip_style)
+                .into()
         }
 
         RibbonItem::LabeledTool(t) => {
@@ -572,10 +556,7 @@ pub(super) fn render_small<'a>(
             let tip_text = tool_tip_text(&label, t.id);
             let content = row![
                 container(make_icon(t.icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
-                super::keytips::label_anchor(
-                    || super::keytips::label_id(t.id),
-                    text(label).size(10).wrapping(advanced_text::Wrapping::None),
-                ),
+                text(label).size(10).wrapping(advanced_text::Wrapping::None),
             ]
             .spacing(3)
             .align_y(iced::Center);
@@ -585,13 +566,11 @@ pub(super) fn render_small<'a>(
                 .width(Length::Fixed(LABELED_SMALL_W + ARROW_W))
                 .height(ROW_H)
                 .padding([3, 4]);
-            super::keytips::anchor(
-                t.id,
-                tooltip(btn, make_tip(tip_text), TipPos::Right)
-                    .gap(6.0)
-                    .delay(Duration::from_millis(400))
-                    .style(tip_style),
-            )
+            tooltip(btn, make_tip(tip_text), TipPos::Right)
+                .gap(6.0)
+                .delay(Duration::from_millis(400))
+                .style(tip_style)
+                .into()
         }
 
         RibbonItem::Dropdown {
@@ -714,12 +693,9 @@ pub(super) fn render_small<'a>(
             };
             let face = row![
                 container(make_icon(cur_icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
-                super::keytips::label_anchor(
-                    || super::keytips::label_id(id),
-                    text(localized_label.clone())
-                        .size(10)
-                        .wrapping(advanced_text::Wrapping::None),
-                ),
+                text(localized_label.clone())
+                    .size(10)
+                    .wrapping(advanced_text::Wrapping::None),
             ]
             .spacing(3)
             .align_y(iced::Center);
@@ -837,10 +813,6 @@ pub(super) fn render_large_dropdown<'a>(
         })
         .or_else(|| items.first().map(|(_, lbl, _)| *lbl))
         .unwrap_or(id);
-    // An empty label: the face keeps its own icon and names the chosen item.
-    let names_item = explicit_label == Some("");
-    let cur_icon = if names_item { icon } else { cur_icon };
-    let explicit_label = explicit_label.filter(|label| !label.is_empty());
     let label = t!(explicit_label.unwrap_or(cur_label)).into_owned();
     let tip_text = tool_tip_text(&t!(cur_label), last);
     let arr_tip = format!("{} {}", label, t!("options"));
@@ -854,14 +826,11 @@ pub(super) fn render_large_dropdown<'a>(
                 .height(Fill)
                 .align_x(iced::Center)
                 .align_y(iced::Center),
-            super::keytips::label_anchor(
-                || super::keytips::label_id(id),
-                text(label.clone())
-                    .size(10)
-                    .width(Fill)
-                    .align_x(iced::Center)
-                    .wrapping(advanced_text::Wrapping::Word),
-            ),
+            text(label.clone())
+                .size(10)
+                .width(Fill)
+                .align_x(iced::Center)
+                .wrapping(advanced_text::Wrapping::Word),
         ]
         .align_x(iced::Center)
         .spacing(0)
@@ -924,7 +893,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
             let event = t.event.clone();
             let icon_el: Element<Message> = make_icon(t.icon, 16.0);
             let msg = module_event_to_message(event);
-            let btn = tooltip(
+            tooltip(
                 button(icon_el)
                     .on_press(msg)
                     .style(move |theme: &Theme, status| tool_btn_style(theme, is_active, status))
@@ -934,8 +903,8 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
             )
             .gap(4.0)
             .delay(Duration::from_millis(400))
-            .style(tip_style);
-            super::keytips::anchor(t.id, btn)
+            .style(tip_style)
+            .into()
         })
         .collect();
     row(btns).spacing(2).align_y(iced::Center).into()
@@ -982,14 +951,11 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                         .height(Fill)
                         .align_x(iced::Center)
                         .align_y(iced::Center),
-                    super::keytips::label_anchor(
-                        || super::keytips::label_id(t.id),
-                        text(label.clone())
-                            .size(10)
-                            .width(Fill)
-                            .align_x(iced::Center)
-                            .wrapping(advanced_text::Wrapping::Word),
-                    ),
+                    text(label.clone())
+                        .size(10)
+                        .width(Fill)
+                        .align_x(iced::Center)
+                        .wrapping(advanced_text::Wrapping::Word),
                 ]
                 .align_x(iced::Center)
                 .spacing(0)
@@ -1006,17 +972,15 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 bottom: 4.0,
                 left: 4.0,
             });
-            super::keytips::anchor(
-                t.id,
-                tooltip(
-                    automatic_large_button(label, btn.into()),
-                    make_tip(tip_text),
-                    TipPos::Right,
-                )
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style),
+            tooltip(
+                automatic_large_button(label, btn.into()),
+                make_tip(tip_text),
+                TipPos::Right,
             )
+            .gap(6.0)
+            .delay(Duration::from_millis(400))
+            .style(tip_style)
+            .into()
         }
 
         RibbonItem::LargeDropdown {
@@ -1115,12 +1079,9 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                     freeze_icon,
                     lock_icon,
                     swatch,
-                    container(super::keytips::label_anchor(
-                        || super::keytips::label_id(LAYER_COMBO_ID),
-                        text(active_layer_label).size(11),
-                    ))
-                    .width(name_w)
-                    .clip(true),
+                    container(text(active_layer_label).size(11))
+                        .width(name_w)
+                        .clip(true),
                     icons::themed_arrow_down(9.0),
                 ]
                 .spacing(4)
@@ -1188,12 +1149,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 button(
                     row![
                         swatch_el,
-                        container(super::keytips::label_anchor(
-                            || super::keytips::label_id(dd_id),
-                            text(label).size(10),
-                        ))
-                        .width(Fill)
-                        .clip(true),
+                        container(text(label).size(10)).width(Fill).clip(true),
                         if is_open {
                             icons::themed_arrow_up(8.0)
                         } else {
@@ -1209,10 +1165,7 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
                 .width(Length::Fixed(PROP_W))
             };
 
-            // ByLayer shows the current layer's colour.
-            let color_swatch = super::layer_color(layer_infos, active_layer)
-                .filter(|_| active_color == AcadColor::ByLayer)
-                .unwrap_or_else(|| acad_color_display(active_color).0);
+            let (color_swatch, _) = acad_color_display(active_color);
             let color_row = prop_row(
                 crate::ui::color_select::color_display_name(active_color),
                 PROP_COLOR_ID,
@@ -1265,12 +1218,9 @@ pub(super) fn render_large<'a>(item: &RibbonItem, ctx: &RenderCtx<'_>) -> Elemen
             // ── combo button ──
             let combo_btn = button(
                 row![
-                    container(super::keytips::label_anchor(
-                        || super::keytips::label_id(combo_id),
-                        text(active.clone()).size(11),
-                    ))
-                    .width(Fill)
-                    .clip(true),
+                    container(text(active.clone()).size(11))
+                        .width(Fill)
+                        .clip(true),
                     if is_open {
                         icons::themed_arrow_up(9.0)
                     } else {
@@ -1356,13 +1306,11 @@ pub(super) fn quick_access_btn<'a>(
     .width(Length::Fixed(TOP_HIST_W))
     .height(24)
     .padding([2, 0]);
-    super::keytips::anchor_with(
-        || super::keytips::quick_access_anchor(cmd),
-        tooltip(btn, make_tip(t!(label).into_owned()), TipPos::Bottom)
-            .gap(6.0)
-            .delay(Duration::from_millis(400))
-            .style(tip_style),
-    )
+    tooltip(btn, make_tip(t!(label).into_owned()), TipPos::Bottom)
+        .gap(6.0)
+        .delay(Duration::from_millis(400))
+        .style(tip_style)
+        .into()
 }
 
 pub(super) fn render_history_control<'a>(

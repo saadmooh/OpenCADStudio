@@ -14,7 +14,7 @@ use kernel::geom2d::Curve;
 use crate::command::{DimensionAssociationSource, TangentObject};
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 use crate::scene::pick::interaction_index::WireSource;
-const DEFAULT_OSNAP_RADIUS_PX: f32 = 25.0;
+const DEFAULT_OSNAP_RADIUS_PX: f32 = 15.0;
 
 // ── Snap type ─────────────────────────────────────────────────────────────
 
@@ -114,77 +114,6 @@ pub const ALL_3D_SNAP_MODES: &[(SnapType, &str, &str)] = &[
     (SnapType::FacePerpendicular, "⟂", "Perpendicular to face"),
     (SnapType::NearestFace, "✦", "Nearest to face"),
 ];
-
-/// Transparent object snap override kind (single-pick override).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SnapOverrideKind {
-    Mode(SnapType),
-    None,
-}
-
-/// Parses a transparent object snap override keyword (e.g. `MID`, `END`, `CEN`, `NON`).
-///
-/// Requires at least 3 letters matching a supported snap mode or alias.
-/// Leading underscores (e.g. `_MID`) and case variations are permitted.
-pub fn parse_snap_override(input: &str) -> Option<SnapOverrideKind> {
-    let s = input.trim().trim_start_matches('_').to_ascii_lowercase();
-    if s.len() < 3 {
-        return None;
-    }
-    if s.starts_with("end") && "endpoint".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Endpoint));
-    }
-    if s.starts_with("mid") && "midpoint".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Midpoint));
-    }
-    if s.starts_with("cen") && ("center".starts_with(&s) || "centre".starts_with(&s)) {
-        return Some(SnapOverrideKind::Mode(SnapType::Center));
-    }
-    if (s.starts_with("gce") && "gcen".starts_with(&s))
-        || (s.starts_with("geo")
-            && ("geocenter".starts_with(&s) || "geometriccenter".starts_with(&s)))
-    {
-        return Some(SnapOverrideKind::Mode(SnapType::GeometricCenter));
-    }
-    if s.starts_with("nod") && "node".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Node));
-    }
-    if s.starts_with("qua") && "quadrant".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Quadrant));
-    }
-    if s.starts_with("int") && "intersection".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Intersection));
-    }
-    if s.starts_with("ext") && "extension".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Extension));
-    }
-    if s.starts_with("ins") && ("insertion".starts_with(&s) || "insert".starts_with(&s)) {
-        return Some(SnapOverrideKind::Mode(SnapType::Insertion));
-    }
-    if s.starts_with("per") && "perpendicular".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Perpendicular));
-    }
-    if s.starts_with("tan") && "tangent".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Tangent));
-    }
-    if s.starts_with("nea") && "nearest".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Nearest));
-    }
-    if s.starts_with("app")
-        && ("apparent".starts_with(&s)
-            || "apparentintersection".starts_with(&s)
-            || "appint".starts_with(&s))
-    {
-        return Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection));
-    }
-    if s.starts_with("par") && "parallel".starts_with(&s) {
-        return Some(SnapOverrideKind::Mode(SnapType::Parallel));
-    }
-    if s.starts_with("non") && "none".starts_with(&s) {
-        return Some(SnapOverrideKind::None);
-    }
-    None
-}
 
 // ── Snap result ───────────────────────────────────────────────────────────
 
@@ -2204,20 +2133,25 @@ impl Snapper {
         // direct-evaluation pass).
         if self.snap_enabled && self.is_on(SnapType::Tangent) {
             let mut eval_tangent = |wire: &WireModel| {
-                let mut line_cursor = 0usize;
                 for tg in &wire.tangent_geoms {
-                    // A tangent point computed from the rubber-band base.
-                    let mut exact = false;
-                    let (world_pt, mut d2) = match tg {
+                    let (world_pt, d2) = match tg {
                         TangentGeom::Line { p1, p2 } => {
-                            let (lp1, lp2) =
-                                tangent_line_endpoints(wire, *p1, *p2, &mut line_cursor);
-                            let sp0 = world_to_screen(lp1, view_rot, eye, bounds);
-                            let sp1 = world_to_screen(lp2, view_rot, eye, bounds);
+                            let sp0 = world_to_screen(
+                                glam::DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64),
+                                view_rot,
+                                eye,
+                                bounds,
+                            );
+                            let sp1 = world_to_screen(
+                                glam::DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64),
+                                view_rot,
+                                eye,
+                                bounds,
+                            );
                             let d2 = dist2_to_segment(cursor_screen, sp0, sp1);
-                            let t = t_on_segment(cursor_screen, sp0, sp1) as f64;
-                            let w = lp1 + t * (lp2 - lp1);
-                            (w, d2)
+                            let t = t_on_segment(cursor_screen, sp0, sp1);
+                            let w = Vec3::from(*p1) + t * (Vec3::from(*p2) - Vec3::from(*p1));
+                            (w.as_dvec3(), d2)
                         }
                         TangentGeom::Circle { center, radius } => {
                             let cv = Vec3::from(*center);
@@ -2237,7 +2171,6 @@ impl Snapper {
                                 {
                                     let s0 = world_to_screen(t0.as_dvec3(), view_rot, eye, bounds);
                                     let s1 = world_to_screen(t1.as_dvec3(), view_rot, eye, bounds);
-                                    exact = true;
                                     if dist2(s0, cursor_screen) <= dist2(s1, cursor_screen) {
                                         t0
                                     } else {
@@ -2304,7 +2237,6 @@ impl Snapper {
                                     })
                                     .unwrap_or_else(|| DVec3::from_array(*center))
                             };
-                            exact = candidate.is_some();
                             let world = candidate.unwrap_or_else(fallback);
                             let edge_d2 = wire
                                 .points
@@ -2354,7 +2286,6 @@ impl Snapper {
                                     })
                                     .unwrap_or(cv)
                             };
-                            exact = candidate.is_some();
                             let world = candidate.unwrap_or_else(fallback);
                             let edge_d2 = wire
                                 .points
@@ -2434,7 +2365,6 @@ impl Snapper {
                                         }
                                     };
 
-                                exact = candidate.is_some();
                                 let world = candidate.unwrap_or(fallback);
                                 let edge_d2 = if wire.points.len() >= 2 {
                                     wire.points
@@ -2462,17 +2392,11 @@ impl Snapper {
                             }
                         }
                     };
+                    let (tier, sub) = (
+                        snap_tier(SnapType::Tangent),
+                        snap_priority(SnapType::Tangent),
+                    );
                     let screen_pt = world_to_screen(world_pt, view_rot, eye, bounds);
-                    // Near the computed tangent point it is a point snap like
-                    // the others, so the rim-hover Center no longer masks it.
-                    let point_d2 = dist2(screen_pt, cursor_screen);
-                    let tier = if exact && point_d2 < radius2 {
-                        d2 = point_d2;
-                        0
-                    } else {
-                        snap_tier(SnapType::Tangent)
-                    };
-                    let sub = snap_priority(SnapType::Tangent);
                     if d2 < radius2
                         && in_bounds(screen_pt)
                         && snap_better(tier, d2, sub, (best_rank, best_d2, best_sub))
@@ -2481,12 +2405,10 @@ impl Snapper {
                         best_sub = sub;
                         best_d2 = d2;
                         let tangent_obj = match tg {
-                            TangentGeom::Line { p1, p2 } => {
-                                let mut cursor = 0usize;
-                                let (lp1, lp2) =
-                                    tangent_line_endpoints(wire, *p1, *p2, &mut cursor);
-                                TangentObject::Line { p1: lp1, p2: lp2 }
-                            }
+                            TangentGeom::Line { p1, p2 } => TangentObject::Line {
+                                p1: glam::DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64),
+                                p2: glam::DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64),
+                            },
                             TangentGeom::Circle { center, radius } => TangentObject::Circle {
                                 center: glam::DVec3::new(
                                     center[0] as f64,
@@ -5505,57 +5427,6 @@ mod ext_tests {
     }
 
     #[test]
-    fn tangent_point_beats_rim_center() {
-        // TAN and CEN on, the cursor on the circle at the tangent point seen
-        // from the base: Tangent wins, not the rim-hover Center (#1768).
-        let mut snapper = Snapper::default();
-        snapper.snap_enabled = true;
-        snapper.enabled = [SnapType::Tangent, SnapType::Center].into_iter().collect();
-        snapper.from_point = Some(DVec3::new(100.0, 0.0, 0.0));
-        let points = (0..=64)
-            .map(|i| {
-                let a = i as f32 / 64.0 * std::f32::consts::TAU;
-                [50.0 * a.cos(), 50.0 * a.sin(), 0.0]
-            })
-            .collect();
-        let circle = WireModel {
-            points,
-            aabb: [-50.0, -50.0, 50.0, 50.0],
-            snap_pts: vec![(DVec3::ZERO, SnapHint::Center)],
-            tangent_geoms: vec![TangentGeom::Circle {
-                center: [0.0, 0.0, 0.0],
-                radius: 50.0,
-            }],
-            ..Default::default()
-        };
-        let wires = vec![circle];
-        let view_rot = Mat4::from_scale(Vec3::new(0.005, 0.005, 1.0));
-        let bounds = Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width: 1000.0,
-            height: 1000.0,
-        };
-        let tangent = DVec3::new(25.0, 50.0 * 0.75f64.sqrt(), 0.0);
-        let cursor = world_to_screen(tangent, view_rot, DVec3::ZERO, bounds);
-        let snap = snapper
-            .snap(
-                tangent,
-                cursor,
-                wires.as_slice(),
-                view_rot,
-                DVec3::ZERO,
-                bounds,
-                Vec3::ZERO,
-                (Vec3::X, Vec3::Y, Vec3::Z),
-                None,
-            )
-            .expect("a snap on the rim");
-        assert_eq!(snap.snap_type, SnapType::Tangent);
-        assert!((snap.world - tangent).length() < 1e-3);
-    }
-
-    #[test]
     fn test_ellipse_arc_tangent_snap_ignores_break() {
         use std::f64::consts::PI;
         let mut snapper = Snapper::default();
@@ -5642,183 +5513,5 @@ mod ext_tests {
             res_break.is_none(),
             "cursor over ellipse arc break must NOT snap to tangent"
         );
-    }
-
-    #[test]
-    fn test_parse_snap_override() {
-        use super::{parse_snap_override, SnapOverrideKind, SnapType};
-
-        // 3-letter prefixes
-        assert_eq!(
-            parse_snap_override("end"),
-            Some(SnapOverrideKind::Mode(SnapType::Endpoint))
-        );
-        assert_eq!(
-            parse_snap_override("mid"),
-            Some(SnapOverrideKind::Mode(SnapType::Midpoint))
-        );
-        assert_eq!(
-            parse_snap_override("cen"),
-            Some(SnapOverrideKind::Mode(SnapType::Center))
-        );
-        assert_eq!(
-            parse_snap_override("nod"),
-            Some(SnapOverrideKind::Mode(SnapType::Node))
-        );
-        assert_eq!(
-            parse_snap_override("qua"),
-            Some(SnapOverrideKind::Mode(SnapType::Quadrant))
-        );
-        assert_eq!(
-            parse_snap_override("int"),
-            Some(SnapOverrideKind::Mode(SnapType::Intersection))
-        );
-        assert_eq!(
-            parse_snap_override("ext"),
-            Some(SnapOverrideKind::Mode(SnapType::Extension))
-        );
-        assert_eq!(
-            parse_snap_override("ins"),
-            Some(SnapOverrideKind::Mode(SnapType::Insertion))
-        );
-        assert_eq!(
-            parse_snap_override("per"),
-            Some(SnapOverrideKind::Mode(SnapType::Perpendicular))
-        );
-        assert_eq!(
-            parse_snap_override("tan"),
-            Some(SnapOverrideKind::Mode(SnapType::Tangent))
-        );
-        assert_eq!(
-            parse_snap_override("nea"),
-            Some(SnapOverrideKind::Mode(SnapType::Nearest))
-        );
-        assert_eq!(
-            parse_snap_override("app"),
-            Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection))
-        );
-        assert_eq!(
-            parse_snap_override("par"),
-            Some(SnapOverrideKind::Mode(SnapType::Parallel))
-        );
-        assert_eq!(parse_snap_override("non"), Some(SnapOverrideKind::None));
-        assert_eq!(
-            parse_snap_override("geo"),
-            Some(SnapOverrideKind::Mode(SnapType::GeometricCenter))
-        );
-        assert_eq!(
-            parse_snap_override("gce"),
-            Some(SnapOverrideKind::Mode(SnapType::GeometricCenter))
-        );
-
-        // Case insensitivity & leading underscores
-        assert_eq!(
-            parse_snap_override("_MID"),
-            Some(SnapOverrideKind::Mode(SnapType::Midpoint))
-        );
-        assert_eq!(
-            parse_snap_override("_Endpoint"),
-            Some(SnapOverrideKind::Mode(SnapType::Endpoint))
-        );
-        assert_eq!(
-            parse_snap_override("  _NON  "),
-            Some(SnapOverrideKind::None)
-        );
-        assert_eq!(
-            parse_snap_override("CEN"),
-            Some(SnapOverrideKind::Mode(SnapType::Center))
-        );
-
-        // Full names and aliases
-        assert_eq!(
-            parse_snap_override("endpoint"),
-            Some(SnapOverrideKind::Mode(SnapType::Endpoint))
-        );
-        assert_eq!(
-            parse_snap_override("midpoint"),
-            Some(SnapOverrideKind::Mode(SnapType::Midpoint))
-        );
-        assert_eq!(
-            parse_snap_override("center"),
-            Some(SnapOverrideKind::Mode(SnapType::Center))
-        );
-        assert_eq!(
-            parse_snap_override("centre"),
-            Some(SnapOverrideKind::Mode(SnapType::Center))
-        );
-        assert_eq!(
-            parse_snap_override("quadrant"),
-            Some(SnapOverrideKind::Mode(SnapType::Quadrant))
-        );
-        assert_eq!(
-            parse_snap_override("intersection"),
-            Some(SnapOverrideKind::Mode(SnapType::Intersection))
-        );
-        assert_eq!(
-            parse_snap_override("perpendicular"),
-            Some(SnapOverrideKind::Mode(SnapType::Perpendicular))
-        );
-        assert_eq!(
-            parse_snap_override("tangent"),
-            Some(SnapOverrideKind::Mode(SnapType::Tangent))
-        );
-        assert_eq!(
-            parse_snap_override("nearest"),
-            Some(SnapOverrideKind::Mode(SnapType::Nearest))
-        );
-        assert_eq!(
-            parse_snap_override("apparent"),
-            Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection))
-        );
-        assert_eq!(
-            parse_snap_override("apparentintersection"),
-            Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection))
-        );
-        assert_eq!(
-            parse_snap_override("appint"),
-            Some(SnapOverrideKind::Mode(SnapType::ApparentIntersection))
-        );
-        assert_eq!(
-            parse_snap_override("parallel"),
-            Some(SnapOverrideKind::Mode(SnapType::Parallel))
-        );
-        assert_eq!(
-            parse_snap_override("insert"),
-            Some(SnapOverrideKind::Mode(SnapType::Insertion))
-        );
-        assert_eq!(
-            parse_snap_override("insertion"),
-            Some(SnapOverrideKind::Mode(SnapType::Insertion))
-        );
-        assert_eq!(parse_snap_override("none"), Some(SnapOverrideKind::None));
-        assert_eq!(
-            parse_snap_override("gcen"),
-            Some(SnapOverrideKind::Mode(SnapType::GeometricCenter))
-        );
-        assert_eq!(
-            parse_snap_override("geometriccenter"),
-            Some(SnapOverrideKind::Mode(SnapType::GeometricCenter))
-        );
-        assert_eq!(
-            parse_snap_override("geocenter"),
-            Some(SnapOverrideKind::Mode(SnapType::GeometricCenter))
-        );
-
-        // Rejection of strings shorter than 3 chars
-        assert_eq!(parse_snap_override("en"), None);
-        assert_eq!(parse_snap_override("mi"), None);
-        assert_eq!(parse_snap_override("ce"), None);
-        assert_eq!(parse_snap_override("p"), None);
-        assert_eq!(parse_snap_override("no"), None);
-        assert_eq!(parse_snap_override("_m"), None);
-        assert_eq!(parse_snap_override(""), None);
-
-        // Non-matching tokens
-        assert_eq!(parse_snap_override("line"), None);
-        assert_eq!(parse_snap_override("circle"), None);
-        assert_eq!(parse_snap_override("10,20"), None);
-        assert_eq!(parse_snap_override("@5<45"), None);
-        assert_eq!(parse_snap_override("undo"), None);
-        assert_eq!(parse_snap_override("close"), None);
     }
 }

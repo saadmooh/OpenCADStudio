@@ -518,36 +518,10 @@ fn fonts_map() -> &'static HashMap<String, Font> {
 pub fn is_builtin(name: &str) -> bool {
     let map = fonts_map();
     let key = name.trim().to_ascii_uppercase();
-    let stem = key.rsplit_once('.').map_or(key.as_str(), |(stem, _)| stem);
-    (map.contains_key(&key) || map.contains_key(stem)) && !installed_alias(stem, name)
-}
-
-/// An alias names a real font (ISOCPEUR is a TrueType face): an installed
-/// copy of exactly that font draws it, Cyrillic included, where the LFF
-/// stand-in has no such glyphs (#1764). A name written as an `.shx` file
-/// never means the TrueType face: a missing `isocpeur.shx` or `swiss.shx`
-/// draws with the stroke substitute, not the installed `.ttf` (measured).
-fn installed_alias(stem: &str, name: &str) -> bool {
-    use crate::scene::text::sysfont;
-    !is_shx_name(name)
-        && ALIASES.iter().any(|(alias, _)| *alias == stem)
-        && (sysfont::family_for_file(name).is_some()
-            || sysfont::canonical_family_name(stem)
-                .is_some_and(|family| family.eq_ignore_ascii_case(stem)))
-}
-
-/// Whether `name` is written as an `.shx` file name.
-pub fn is_shx_name(name: &str) -> bool {
-    name.trim().to_ascii_lowercase().ends_with(".shx")
-}
-
-/// Whether an embedded font is that very font (its own stem, as `simplex`
-/// or `romans.shx`), not a stand-in reached through an alias (`txt` draws
-/// with `standard`).
-pub fn is_embedded_font(name: &str) -> bool {
-    let key = name.trim().to_ascii_lowercase();
-    let stem = key.strip_suffix(".shx").unwrap_or(&key);
-    FONTS_SRC.iter().any(|(s, _)| *s == stem)
+    map.contains_key(&key)
+        || key
+            .rsplit_once('.')
+            .is_some_and(|(stem, _)| map.contains_key(stem))
 }
 
 pub fn get_font(name: &str) -> &'static Font {

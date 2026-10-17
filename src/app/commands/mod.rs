@@ -5,13 +5,9 @@ use iced::Task;
 use std::path::PathBuf;
 
 mod attdef;
-mod attman;
-mod block_cmdline;
 mod blocks;
 mod blockvars;
-mod bvisibility;
 mod count;
-mod dgn_import;
 mod dim;
 pub(crate) mod display;
 mod draw;
@@ -20,23 +16,20 @@ mod fileops;
 mod inquiry;
 mod layerprops;
 mod layers;
-mod model_import;
 mod pc_colormap;
 mod pc_extract;
 mod pdf_dialogs;
 pub(crate) mod pdf_import;
-mod pdf_shx_text;
 mod pdf_underlay;
 mod plotvars;
 mod point_cloud;
-mod refedit;
 pub(crate) mod sheet_set;
 mod styleprops;
-mod ucsfollow;
 mod view;
-mod view_presets;
 mod xclip;
 mod xref_attach;
+pub(crate) mod civil_surface;
+pub mod civil_parcel;
 
 // `DrawOrderRefCommand` lives in the `view` family file but is referenced by
 // path (`commands::DrawOrderRefCommand`) from `update.rs`, so re-export it at
@@ -69,7 +62,6 @@ impl OpenCADStudio {
     /// (the block palette), so they don't inherit the previous command's last
     /// point, snaps or dynamic-input values. (#1525)
     pub(in crate::app) fn reset_command_start_state(&mut self, i: usize) {
-        self.tabs[i].measurement.clear();
         // A command parked behind a transparent zoom / MTP goes with it.
         self.tabs[i].suspended_cmd = None;
         self.tabs[i].transparent_resume = false;
@@ -84,7 +76,6 @@ impl OpenCADStudio {
         // A new command collects its own points, so the previous command's
         // accepted snaps must not leak into it.
         self.clear_accepted_snaps();
-        self.snapper.clear_override();
         // Starting a command restarts the right-click cycle, so its first
         // right-click acts as Enter rather than opening the context menu.
         self.tabs[i]
@@ -109,25 +100,6 @@ impl OpenCADStudio {
         let task = self.dispatch_command_inner(cmd, false);
         self.clear_idle_tool_highlight();
         task
-    }
-
-    /// Run a ribbon command. A `;` stands for Enter, as in a menu macro: each
-    /// part answers the running command's prompt, or starts a command when
-    /// none runs (`PDFIMPORT;FILE`).
-    pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
-        if !cmd.contains(';') {
-            return self.dispatch_command(cmd);
-        }
-        let i = self.active_tab;
-        let mut tasks = Vec::new();
-        for part in cmd.split(';') {
-            tasks.push(if self.tabs[i].active_cmd.is_some() {
-                self.feed_active_cmd(part)
-            } else {
-                self.dispatch_command(part)
-            });
-        }
-        Task::batch(tasks)
     }
 
     /// Turn the ribbon highlight off when the command just dispatched left
@@ -175,87 +147,6 @@ impl OpenCADStudio {
         };
         let resolved = self.resolve_alias(cmd);
         let cmd = resolved.as_deref().unwrap_or(cmd);
-        if matches!(cmd.split(' ').next(), Some("BACTION" | "BACTIONTOOL")) {
-            let args = cmd.split_once(' ').map_or("", |(_, a)| a.trim());
-            if !args.is_empty() && crate::scene::block_actions::Kind::parse(args).is_none() {
-                self.command_line.push_error(
-                    crate::t!(
-                        "Supported actions: Move, Scale. Other action types are not wired yet."
-                    )
-                    .as_ref(),
-                );
-                return Task::none();
-            }
-            if let Some(error) = self.action_error(crate::scene::block_actions::Kind::parse(args)) {
-                self.command_line.push_error(crate::t!(error).as_ref());
-                return Task::none();
-            }
-        }
-        if cmd == "BPARAMETER" || cmd.starts_with("BPARAMETER ") {
-            if let Some(error) =
-                self.parameter_placement_error(cmd.strip_prefix("BPARAMETER").unwrap().trim())
-            {
-                self.command_line.push_error(crate::t!(error).as_ref());
-                return Task::none();
-            }
-        }
-        if cmd == "BLOOKUPTABLE" || cmd.starts_with("BLOOKUPTABLE ") {
-            if let Some(error) = self.lookup_table_error() {
-                self.command_line.push_error(crate::t!(error).as_ref());
-                return Task::none();
-            }
-        }
-        if self.tabs[i].block_test.is_some() {
-            let name = cmd.split([' ', ':']).next().unwrap_or(cmd);
-            if matches!(
-                name,
-                "BEDIT"
-                    | "BEDIT_BEGIN"
-                    | "BEDIT_OPEN"
-                    | "REFEDIT"
-                    | "REFEDIT_BEGIN"
-                    | "BSAVE"
-                    | "BSAVEAS"
-                    | "SAVE"
-                    | "QSAVE"
-                    | "SAVEAS"
-                    | "SAVEALL"
-                    | "WBLOCK"
-                    | "EXPORT"
-                    | "ETRANSMIT"
-                    | "ARCHIVE"
-            ) {
-                self.command_line.push_error(
-                    crate::t!("Close Test Block before saving or opening another block editor.")
-                        .as_ref(),
-                );
-                return Task::none();
-            }
-        }
-        // V7 (reference check): inside a block editor session a set of
-        // commands is refused outright. The hook sits after alias resolution
-        // and before the transparent split and the running-command teardown,
-        // so a rejected command leaves whatever is running untouched.
-        if self.tabs[i].active_block_edit.is_some() {
-            let name = cmd.split([' ', ':']).next().unwrap_or(cmd);
-            if matches!(
-                name,
-                "LAYOUT"
-                    | "VPORTS"
-                    | "MVIEW"
-                    | "WBLOCK"
-                    | "PURGE"
-                    | "RENAME"
-                    | "REFEDIT"
-                    | "REFEDIT_BEGIN"
-                    | "PLOT"
-            ) {
-                self.command_line.push_error(
-                    crate::tf!("{} command not allowed in block editor", name).as_ref(),
-                );
-                return Task::none();
-            }
-        }
         if is_spacemouse_command(cmd) {
             return self.run_action(cmd);
         }
@@ -337,6 +228,85 @@ impl OpenCADStudio {
         self.ribbon
             .show_command(strip_command_prefixes(cmd).unwrap_or(cmd));
 
+        let trimmed_cmd = cmd.trim();
+        let upper_cmd = trimmed_cmd.to_ascii_uppercase();
+
+        // ── Civil 3D Parcel Layout Tools Dialog ──────────────────────────
+        if upper_cmd == "PARCELLAYOUT" || upper_cmd == "PARCELSIZING" || upper_cmd == "PARCELTOOLS" || upper_cmd == "PARCELLAYOUTTOOLS" {
+            self.command_line.record_recent(cmd);
+            if self.parcel_layout_state.is_none() {
+                self.parcel_layout_state = Some(crate::ui::window::parcel_layout_tools::ParcelLayoutToolsState::default());
+            }
+            self.active_modal = Some(crate::app::ModalKind::ParcelLayoutTools);
+            return Task::none();
+        }
+
+        // ── Civil 3D Parcel Properties Dialog ────────────────────────────
+        if upper_cmd == "PARCELPROPS" || upper_cmd.starts_with("PARCELPROPS ") || upper_cmd.starts_with("PARCELPROPS:")
+            || upper_cmd == "PARCELPROPERTIES" || upper_cmd.starts_with("PARCELPROPERTIES ") {
+            let rest = if upper_cmd.starts_with("PARCELPROPS ") {
+                trimmed_cmd[12..].trim()
+            } else if upper_cmd.starts_with("PARCELPROPERTIES ") {
+                trimmed_cmd[17..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mut tab_kind = None;
+            let hex_str = if let Some(&p0) = parts.first() {
+                p0.trim_start_matches("0x").trim_start_matches("0X")
+            } else {
+                ""
+            };
+            if let Some(&p1) = parts.get(1) {
+                let p1_up = p1.to_ascii_uppercase();
+                if p1_up.starts_with("COMP") || p1_up.starts_with("LEG") {
+                    tab_kind = Some(crate::ui::window::parcel_properties::ParcelPropertiesTab::Composition);
+                } else if p1_up.starts_with("ANA") || p1_up.starts_with("MAP") {
+                    tab_kind = Some(crate::ui::window::parcel_properties::ParcelPropertiesTab::Analysis);
+                } else if p1_up.starts_with("STAT") {
+                    tab_kind = Some(crate::ui::window::parcel_properties::ParcelPropertiesTab::Statistics);
+                }
+            }
+            let target_handle = if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                Some(codec::Handle::new(val))
+            } else {
+                self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_parcel::ParcelData::from_entity(e).map(|p| p.handle))
+                    .or_else(|| civil_parcel::ParcelData::all_parcels(&self.tabs[i].scene.document).first().map(|p| p.handle))
+            };
+
+            if let Some(h) = target_handle {
+                self.command_line.record_recent(cmd);
+                if let Some(tab) = self.tabs.get(i) {
+                    if let Some(p) = civil_parcel::ParcelData::from_document_entity(&tab.scene.document, h) {
+                        let mut state = crate::ui::window::parcel_properties::ParcelPropertiesState::from_parcel(&p);
+                        if let Some(tk) = tab_kind {
+                            state.active_tab = tk;
+                        }
+                        self.parcel_properties_state = Some(state);
+                        self.active_modal = Some(crate::app::ModalKind::ParcelProperties);
+                    }
+                }
+                return Task::none();
+            } else {
+                self.command_line.push_error("No parcel found in drawing to open properties.");
+                return Task::none();
+            }
+        }
+
+        // ── Civil 3D Parcel Dynamic Synchronization ──────────────────────
+        if upper_cmd == "PARCELUPDATE" || upper_cmd == "PARCELSYNC" || upper_cmd == "PARCELREFRESH"
+            || upper_cmd == "PC_UPDATE" || upper_cmd == "PC_SYNC" {
+            self.command_line.record_recent(cmd);
+            if let Some(tab) = self.tabs.get_mut(i) {
+                let count = civil_parcel::ParcelData::sync_dynamic_parcels(&mut tab.scene.document, None, None);
+                tab.scene.bump_geometry();
+                tab.dirty = true;
+                self.command_line.push_output(&format!("✔ Dynamically synchronized {} parcel(s), centroid labels, and area table.", count));
+            }
+            return Task::none();
+        }
+
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             // try_dispatch returns true for both finished commands and interactive
             // commands that it just installed. If no command is now active, the
@@ -349,6 +319,513 @@ impl OpenCADStudio {
                 self.ribbon.deactivate_tool();
             }
             return self.finish_dispatch(cmd);
+        }
+
+        // Direct entity selection by handle (e.g. from the Browser / Prospector Tree: `SELECT 9D5`)
+        if upper_cmd.starts_with("SELECT ") || upper_cmd.starts_with("SELECT:") {
+            let rest = if upper_cmd.starts_with("SELECT ") {
+                &trimmed_cmd[7..]
+            } else {
+                &trimmed_cmd[7..]
+            }.trim();
+            let mut parsed_handles = Vec::new();
+            for part in rest.split(|c: char| c.is_whitespace() || c == ',') {
+                let s = part.trim().trim_start_matches("0x").trim_start_matches("0X");
+                if !s.is_empty() {
+                    if let Ok(val) = u64::from_str_radix(s, 16) {
+                        parsed_handles.push(codec::Handle::new(val));
+                    }
+                }
+            }
+            if !parsed_handles.is_empty() {
+                self.tabs[i].scene.deselect_all();
+                for &h in &parsed_handles {
+                    self.tabs[i].scene.select_entity(h, false);
+                }
+                self.tabs[i].scene.remember_current_view();
+                let _ = self.tabs[i].scene.zoom_to_entities(&parsed_handles);
+                self.refresh_selected_grips();
+                self.refresh_properties();
+                self.command_line.record_recent(cmd);
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Statistics ──────────────────────────────
+        if upper_cmd == "SURFACESTATS" || upper_cmd.starts_with("SURFACESTATS ") || upper_cmd.starts_with("SURFACESTATS:") {
+            let rest = if upper_cmd.starts_with("SURFACESTATS ") {
+                trimmed_cmd[12..].trim()
+            } else if upper_cmd.starts_with("SURFACESTATS:") {
+                trimmed_cmd[13..].trim()
+            } else {
+                ""
+            };
+            let hex_str = rest.trim_start_matches("0x").trim_start_matches("0X");
+            let target_surf = if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                civil_surface::TinSurfaceData::from_document_entity(&self.tabs[i].scene.document, codec::Handle::new(val))
+            } else {
+                self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e))
+                    .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).next())
+            };
+
+            if let Some(surf) = target_surf {
+                let report = civil_surface::format_surface_statistics(&surf);
+                self.command_line.push_info(&report);
+                self.command_line.record_recent(cmd);
+                return Task::none();
+            } else {
+                self.command_line.push_error("No TIN surface found in drawing or selection.");
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Create Surface from Points ──────────────
+        if upper_cmd == "SURFACECREATE" || upper_cmd.starts_with("SURFACECREATE ") || upper_cmd.starts_with("SURFACECREATE:") {
+            let rest = if upper_cmd.starts_with("SURFACECREATE ") {
+                trimmed_cmd[14..].trim()
+            } else if upper_cmd.starts_with("SURFACECREATE:") {
+                trimmed_cmd[15..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let surf_name = parts.first().copied().unwrap_or("Surface1");
+            let layer_filter = parts.get(1).copied();
+
+            match civil_surface::create_surface_from_points(&mut self.tabs[i].scene.document, surf_name, layer_filter) {
+                Ok((handle, pt_count, tri_count)) => {
+                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].dirty = true;
+                    self.command_line.record_recent(cmd);
+                    self.command_line.push_output(&format!(
+                        "✔ Created TIN Surface '{}' [{:X}] from {} points ({} triangles).",
+                        surf_name, handle.value(), pt_count, tri_count
+                    ));
+                    return Task::none();
+                }
+                Err(err) => {
+                    self.command_line.push_error(&format!("SURFACECREATE failed: {}", err));
+                    return Task::none();
+                }
+            }
+        }
+
+        // ── Surface Operations: Surface Properties Dialog ──────────────
+        if upper_cmd == "SURFACEPROPS" || upper_cmd.starts_with("SURFACEPROPS ") || upper_cmd.starts_with("SURFACEPROPS:")
+            || upper_cmd == "SURFACEPROPERTIES" || upper_cmd.starts_with("SURFACEPROPERTIES ") {
+            let rest = if upper_cmd.starts_with("SURFACEPROPS ") {
+                trimmed_cmd[13..].trim()
+            } else if upper_cmd.starts_with("SURFACEPROPERTIES ") {
+                trimmed_cmd[18..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mut tab_kind = None;
+            let hex_str = if let Some(&p0) = parts.first() {
+                p0.trim_start_matches("0x").trim_start_matches("0X")
+            } else {
+                ""
+            };
+            if let Some(&p1) = parts.get(1) {
+                let p1_up = p1.to_ascii_uppercase();
+                if p1_up.starts_with("DEF") {
+                    tab_kind = Some(crate::ui::window::surface_properties::SurfacePropertiesTab::Definition);
+                } else if p1_up.starts_with("ANA") {
+                    tab_kind = Some(crate::ui::window::surface_properties::SurfacePropertiesTab::Analysis);
+                } else if p1_up.starts_with("STAT") {
+                    tab_kind = Some(crate::ui::window::surface_properties::SurfacePropertiesTab::Statistics);
+                }
+            }
+            let target_handle = if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                Some(codec::Handle::new(val))
+            } else {
+                self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e).map(|s| s.handle))
+                    .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).map(|s| s.handle).next())
+            };
+
+            if let Some(h) = target_handle {
+                self.command_line.record_recent(cmd);
+                if let Some(tab) = self.tabs.get(i) {
+                    if let Some(surf) = civil_surface::TinSurfaceData::from_document_entity(&tab.scene.document, h) {
+                        let mut state = crate::ui::window::surface_properties::SurfacePropertiesState::from_surface(&surf);
+                        if let Some(tk) = tab_kind {
+                            state.active_tab = tk;
+                        }
+                        self.surface_properties_state = Some(state);
+                        self.active_modal = Some(crate::app::ModalKind::SurfaceProperties);
+                    }
+                }
+                return Task::none();
+            } else {
+                self.command_line.push_error("No surface found to open properties.");
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Generate Contours ───────────────────────
+        if upper_cmd == "SURFACECONTOURS" || upper_cmd.starts_with("SURFACECONTOURS ") || upper_cmd.starts_with("SURFACECONTOURS:") {
+            let rest = if upper_cmd.starts_with("SURFACECONTOURS ") {
+                trimmed_cmd[15..].trim()
+            } else if upper_cmd.starts_with("SURFACECONTOURS:") {
+                trimmed_cmd[16..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mut handle_opt = None;
+            let mut interval = 1.0;
+
+            if let Some(&p0) = parts.first() {
+                let hex_str = p0.trim_start_matches("0x").trim_start_matches("0X");
+                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                    handle_opt = Some(codec::Handle::new(val));
+                    if let Some(p1) = parts.get(1) {
+                        interval = p1.parse().unwrap_or(1.0);
+                    }
+                } else if let Ok(val) = p0.parse::<f64>() {
+                    interval = val;
+                }
+            }
+
+            let target_surf = handle_opt
+                .and_then(|h| civil_surface::TinSurfaceData::from_document_entity(&self.tabs[i].scene.document, h))
+                .or_else(|| self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e)))
+                .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).next());
+
+            if let Some(surf) = target_surf {
+                civil_surface::ensure_layer_with_color(&mut self.tabs[i].scene.document, "LS-CONTOUR-MAJOR", 1);
+                civil_surface::ensure_layer_with_color(&mut self.tabs[i].scene.document, "LS-CONTOUR-MINOR", 8);
+
+                let (major, minor) = civil_surface::generate_contours_chained_smoothed(&surf, interval, true);
+                let major_count = major.len();
+                let minor_count = minor.len();
+
+                for pl in major {
+                    let _ = self.tabs[i].scene.document.add_entity(codec::EntityType::Polyline3D(pl));
+                }
+                for pl in minor {
+                    let _ = self.tabs[i].scene.document.add_entity(codec::EntityType::Polyline3D(pl));
+                }
+
+                self.tabs[i].scene.bump_geometry();
+                self.tabs[i].dirty = true;
+                self.command_line.record_recent(cmd);
+                self.command_line.push_output(&format!(
+                    "✔ Generated {} major & {} minor smoothed contour polylines for surface '{}' (Minor: {:.2}m, Major: {:.2}m).",
+                    major_count, minor_count, surf.name, interval, interval * 5.0
+                ));
+                return Task::none();
+            } else {
+                self.command_line.push_error("No TIN surface found in drawing or selection for contour generation.");
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Earthwork Cut & Fill Volumes ────────────
+        if upper_cmd == "SURFACEVOLUME" || upper_cmd.starts_with("SURFACEVOLUME ") || upper_cmd.starts_with("SURFACEVOLUME:") {
+            let rest = if upper_cmd.starts_with("SURFACEVOLUME ") {
+                trimmed_cmd[13..].trim()
+            } else if upper_cmd.starts_with("SURFACEVOLUME:") {
+                trimmed_cmd[14..].trim()
+            } else {
+                ""
+            };
+
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let (base_surf, comp_surf) = if parts.len() >= 2 {
+                let h0 = u64::from_str_radix(parts[0].trim_start_matches("0x").trim_start_matches("0X"), 16).ok().map(codec::Handle::new);
+                let h1 = u64::from_str_radix(parts[1].trim_start_matches("0x").trim_start_matches("0X"), 16).ok().map(codec::Handle::new);
+                (
+                    h0.and_then(|h| civil_surface::TinSurfaceData::from_document_entity(&self.tabs[i].scene.document, h)),
+                    h1.and_then(|h| civil_surface::TinSurfaceData::from_document_entity(&self.tabs[i].scene.document, h)),
+                )
+            } else {
+                let all_surfs: Vec<civil_surface::TinSurfaceData> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter_map(civil_surface::TinSurfaceData::from_entity)
+                    .collect();
+                if all_surfs.len() >= 2 {
+                    let base_idx = all_surfs.iter().position(|s| s.name.to_ascii_uppercase().contains("EXIST") || s.name.to_ascii_uppercase() == "EG").unwrap_or(0);
+                    let comp_idx = if base_idx == 0 { 1 } else { 0 };
+                    (Some(all_surfs[base_idx].clone()), Some(all_surfs[comp_idx].clone()))
+                } else {
+                    (None, None)
+                }
+            };
+
+            match (base_surf, comp_surf) {
+                (Some(base), Some(comp)) => {
+                    if let Some(vol) = civil_surface::calculate_volumes(&base, &comp) {
+                        let report = civil_surface::format_volume_report(&vol);
+                        self.command_line.push_info(&report);
+                        self.command_line.record_recent(cmd);
+                        return Task::none();
+                    } else {
+                        self.command_line.push_error("The selected surfaces do not have an overlapping boundary in XY.");
+                        return Task::none();
+                    }
+                }
+                _ => {
+                    self.command_line.push_error("SURFACEVOLUME requires 2 TIN surfaces in the drawing (or specify handles: SURFACEVOLUME <base> <comp>).");
+                    return Task::none();
+                }
+            }
+        }
+
+        // ── Surface Operations: Export to LandXML ───────────────────────
+        if upper_cmd == "SURFACELANDXML" || upper_cmd.starts_with("SURFACELANDXML ") || upper_cmd.starts_with("SURFACELANDXML:") {
+            let rest = if upper_cmd.starts_with("SURFACELANDXML ") {
+                trimmed_cmd[14..].trim()
+            } else if upper_cmd.starts_with("SURFACELANDXML:") {
+                trimmed_cmd[15..].trim()
+            } else {
+                ""
+            };
+            let hex_str = rest.trim_start_matches("0x").trim_start_matches("0X");
+            let target_surf = if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                civil_surface::TinSurfaceData::from_document_entity(&self.tabs[i].scene.document, codec::Handle::new(val))
+            } else {
+                self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e))
+                    .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).next())
+            };
+
+            if let Some(surf) = target_surf {
+                let xml = civil_surface::export_to_landxml(&surf);
+                let out_path = std::env::var("USERPROFILE")
+                    .map(|p| std::path::PathBuf::from(p).join("Desktop").join("Grading_Project").join(format!("{}.xml", surf.name)))
+                    .unwrap_or_else(|_| std::path::PathBuf::from(format!("{}.xml", surf.name)));
+                if std::fs::write(&out_path, xml).is_ok() {
+                    self.command_line.push_output(&format!("✔ Exported surface '{}' to LandXML: {}", surf.name, out_path.display()));
+                } else {
+                    self.command_line.push_error(&format!("Failed to write LandXML to {}", out_path.display()));
+                }
+                self.command_line.record_recent(cmd);
+                return Task::none();
+            } else {
+                self.command_line.push_error("No TIN surface found to export.");
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Swap Edge ──────────────────────────────
+        if upper_cmd == "SURFACESWAPEDGE" || upper_cmd.starts_with("SURFACESWAPEDGE ") || upper_cmd.starts_with("SURFACESWAPEDGE:") {
+            let rest = if upper_cmd.starts_with("SURFACESWAPEDGE ") {
+                trimmed_cmd[16..].trim()
+            } else if upper_cmd.starts_with("SURFACESWAPEDGE:") {
+                trimmed_cmd[17..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mut handle_opt = None;
+            let mut tri_idx = None;
+
+            if let Some(&p0) = parts.first() {
+                let hex_str = p0.trim_start_matches("0x").trim_start_matches("0X");
+                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                    handle_opt = Some(codec::Handle::new(val));
+                    if let Some(p1) = parts.get(1) {
+                        tri_idx = p1.parse::<usize>().ok();
+                    }
+                }
+            }
+
+            let target_handle = handle_opt
+                .or_else(|| self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e).map(|s| s.handle)))
+                .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).map(|s| s.handle).next());
+
+            if let Some(handle) = target_handle {
+                if let Some(idx) = tri_idx {
+                    match civil_surface::swap_edge_in_surface(&mut self.tabs[i].scene.document, handle, Some(idx)) {
+                        Ok(msg) => {
+                            self.tabs[i].scene.bump_geometry();
+                            self.tabs[i].dirty = true;
+                            self.command_line.record_recent(cmd);
+                            self.command_line.push_output(&msg);
+                            return Task::none();
+                        }
+                        Err(err) => {
+                            self.command_line.push_error(&format!("SURFACESWAPEDGE failed: {}", err));
+                            return Task::none();
+                        }
+                    }
+                } else if let Some(ent) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                    let swap_cmd = civil_surface::SurfaceSwapEdgeCommand::new(handle, ent);
+                    self.command_line.push_info(&swap_cmd.prompt());
+                    let opts = swap_cmd.options();
+                    self.command_line.set_step_options(opts);
+                    self.tabs[i].active_cmd = Some(Box::new(swap_cmd));
+                    return self.finish_dispatch(cmd);
+                } else {
+                    self.command_line.push_error("Surface entity not found.");
+                    return Task::none();
+                }
+            } else {
+                self.command_line.push_error("No TIN surface found for SURFACESWAPEDGE.");
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Raise / Lower Surface ──────────────────
+        if upper_cmd == "SURFACERAISELOWER" || upper_cmd.starts_with("SURFACERAISELOWER ") || upper_cmd.starts_with("SURFACERAISELOWER:") {
+            let rest = if upper_cmd.starts_with("SURFACERAISELOWER ") {
+                trimmed_cmd[18..].trim()
+            } else if upper_cmd.starts_with("SURFACERAISELOWER:") {
+                trimmed_cmd[19..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mut handle_opt = None;
+            let mut delta_z = 1.0;
+
+            if let Some(&p0) = parts.first() {
+                let hex_str = p0.trim_start_matches("0x").trim_start_matches("0X");
+                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                    handle_opt = Some(codec::Handle::new(val));
+                    if let Some(p1) = parts.get(1) {
+                        delta_z = p1.parse::<f64>().unwrap_or(1.0);
+                    }
+                } else if let Ok(val) = p0.parse::<f64>() {
+                    delta_z = val;
+                }
+            }
+
+            let target_handle = handle_opt
+                .or_else(|| self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e).map(|s| s.handle)))
+                .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).map(|s| s.handle).next());
+
+            if let Some(handle) = target_handle {
+                match civil_surface::raise_lower_surface(&mut self.tabs[i].scene.document, handle, delta_z) {
+                    Ok(msg) => {
+                        self.tabs[i].scene.bump_geometry();
+                        self.tabs[i].dirty = true;
+                        self.command_line.record_recent(cmd);
+                        self.command_line.push_output(&msg);
+                        return Task::none();
+                    }
+                    Err(err) => {
+                        self.command_line.push_error(&format!("SURFACERAISELOWER failed: {}", err));
+                        return Task::none();
+                    }
+                }
+            } else {
+                self.command_line.push_error("No TIN surface found for SURFACERAISELOWER.");
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Delete Triangle ────────────────────────
+        if upper_cmd == "SURFACEDELETETRI" || upper_cmd.starts_with("SURFACEDELETETRI ") || upper_cmd.starts_with("SURFACEDELETETRI:") {
+            let rest = if upper_cmd.starts_with("SURFACEDELETETRI ") {
+                trimmed_cmd[17..].trim()
+            } else if upper_cmd.starts_with("SURFACEDELETETRI:") {
+                trimmed_cmd[18..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mut handle_opt = None;
+            let mut tri_idx = None;
+
+            if let Some(&p0) = parts.first() {
+                let hex_str = p0.trim_start_matches("0x").trim_start_matches("0X");
+                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                    handle_opt = Some(codec::Handle::new(val));
+                    if let Some(p1) = parts.get(1) {
+                        tri_idx = p1.parse::<usize>().ok();
+                    }
+                } else if let Ok(val) = p0.parse::<usize>() {
+                    tri_idx = Some(val);
+                }
+            }
+
+            let target_handle = handle_opt
+                .or_else(|| self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e).map(|s| s.handle)))
+                .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).map(|s| s.handle).next());
+
+            if let Some(handle) = target_handle {
+                if let Some(idx) = tri_idx {
+                    match civil_surface::delete_triangle_in_surface(&mut self.tabs[i].scene.document, handle, Some(idx)) {
+                        Ok(msg) => {
+                            self.tabs[i].scene.bump_geometry();
+                            self.tabs[i].dirty = true;
+                            self.command_line.record_recent(cmd);
+                            self.command_line.push_output(&msg);
+                            return Task::none();
+                        }
+                        Err(err) => {
+                            self.command_line.push_error(&format!("SURFACEDELETETRI failed: {}", err));
+                            return Task::none();
+                        }
+                    }
+                } else if let Some(ent) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                    let del_cmd = civil_surface::SurfaceDeleteTriangleCommand::new(handle, ent);
+                    self.command_line.push_info(&del_cmd.prompt());
+                    let opts = del_cmd.options();
+                    self.command_line.set_step_options(opts);
+                    self.tabs[i].active_cmd = Some(Box::new(del_cmd));
+                    return self.finish_dispatch(cmd);
+                } else {
+                    self.command_line.push_error("Surface entity not found.");
+                    return Task::none();
+                }
+            } else {
+                self.command_line.push_error("No TIN surface found for SURFACEDELETETRI.");
+                return Task::none();
+            }
+        }
+
+        // ── Surface Operations: Surface Style & Visibility ─────────────
+        if upper_cmd == "SURFACESTYLE" || upper_cmd.starts_with("SURFACESTYLE ") || upper_cmd.starts_with("SURFACESTYLE:") {
+            let rest = if upper_cmd.starts_with("SURFACESTYLE ") {
+                trimmed_cmd[13..].trim()
+            } else if upper_cmd.starts_with("SURFACESTYLE:") {
+                trimmed_cmd[14..].trim()
+            } else {
+                ""
+            };
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mut handle_opt = None;
+            let mut style = "CONTOURS";
+
+            if let Some(&p0) = parts.first() {
+                let hex_str = p0.trim_start_matches("0x").trim_start_matches("0X");
+                if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                    handle_opt = Some(codec::Handle::new(val));
+                    if let Some(p1) = parts.get(1) {
+                        style = p1;
+                    }
+                } else {
+                    style = p0;
+                }
+            }
+
+            let target_handle = handle_opt
+                .or_else(|| self.tabs[i].scene.selected_entities().into_iter().find_map(|(_, e)| civil_surface::TinSurfaceData::from_entity(e).map(|s| s.handle)))
+                .or_else(|| self.tabs[i].scene.document.entities().filter_map(civil_surface::TinSurfaceData::from_entity).map(|s| s.handle).next());
+
+            if let Some(handle) = target_handle {
+                match civil_surface::apply_surface_style(&mut self.tabs[i].scene.document, handle, style) {
+                    Ok(msg) => {
+                        self.tabs[i].scene.bump_geometry();
+                        self.tabs[i].dirty = true;
+                        self.command_line.record_recent(cmd);
+                        self.command_line.push_output(&msg);
+                        return Task::none();
+                    }
+                    Err(err) => {
+                        self.command_line.push_error(&format!("SURFACESTYLE failed: {}", err));
+                        return Task::none();
+                    }
+                }
+            } else {
+                self.command_line.push_error("No TIN surface found for SURFACESTYLE.");
+                return Task::none();
+            }
         }
 
         // Command families are dispatched in source order (see
@@ -401,9 +878,6 @@ impl OpenCADStudio {
     /// `finish_dispatch`), or `None` to defer to the next — equivalent to one
     /// sequential `match` over all arms.
     fn dispatch_families(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
-        if let Some(t) = self.dispatch_ucsfollow(cmd, i) {
-            return Some(t);
-        }
         if let Some(t) = self.dispatch_fileops(cmd, i) {
             return Some(t);
         }
@@ -411,18 +885,6 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_xref_attach(cmd, i) {
-            return Some(t);
-        }
-        if let Some(t) = self.dispatch_import(cmd, i) {
-            return Some(t);
-        }
-        if let Some(t) = self.dispatch_model_import(cmd, i) {
-            return Some(t);
-        }
-        if let Some(t) = self.dispatch_bvisibility(cmd, i) {
-            return Some(t);
-        }
-        if let Some(t) = self.dispatch_block_cmdline(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_blocks(cmd, i) {
@@ -453,9 +915,6 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_dim(cmd, i) {
-            return Some(t);
-        }
-        if let Some(t) = self.dispatch_refedit(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_inquiry(cmd, i) {
@@ -530,14 +989,7 @@ pub fn is_transparent(cmd: &str) -> bool {
     is_spacemouse_command(cmd)
         || matches!(
             cmd,
-            "ORTHO"
-                | "GRID"
-                | "SNAP"
-                | "POLAR"
-                | "OSNAP"
-                | "DSETTINGS"
-                | "BAUTHORPALETTE"
-                | "BAUTHORPALETTECLOSE"
+            "ORTHO" | "GRID" | "SNAP" | "POLAR" | "OSNAP" | "DSETTINGS"
         )
 }
 
@@ -562,7 +1014,6 @@ pub fn start_allowed(cmd: &str) -> bool {
         || matches!(
             cmd,
             "NEW"
-            | "QNEW"
             | "OPEN"
             | "EXIT"
             | "QUIT"
@@ -598,18 +1049,11 @@ inventory::submit!(crate::command::CommandRegistration {
         // Drafting-aid / display toggles + customization entry points wired in the
         // dispatch families (no interactive command module of their own).
         "ALIASEDIT",
-        // Implemented command-line block forms must also validate in ALIASEDIT.
-        "-BLOCK",
-        "-BMAKE",
-        "-WBLOCK",
-        "-WB",
-        "-ATTEDIT",
         "CLEANSCREEN",
         "CUI",
         "DSETTINGS",
         "PARAMETERS",
         "GRID",
-        "GRAPHICATTRIBUTES",
         "ISODRAFT",
         "ISOPLANE",
         "OSNAP",
@@ -628,9 +1072,7 @@ inventory::submit!(crate::command::CommandRegistration {
         // Standard aliases for existing commands.
         "BMAKE",
         "EXPORTPDF",
-        "EXPORTSVG",
         "PRINTALL",
-        "PUBLISH",
         "DDIM",
         // Inquiry: list the whole drawing database.
         "DBLIST",
@@ -684,8 +1126,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "INSNAME",
         "ATTMAN",
         "BATTMAN",
-        "-BEDIT",
-        "INSBASE",
         // Drawing-content overview.
         "ADCENTER",
         "CONTENTBROWSER",
@@ -763,7 +1203,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "SL",
         "INTERFERE",
         "INF",
-        "SECTIONCULL",
         "PRESSPULL",
         "THICKEN",
         "3DROTATE",
@@ -855,25 +1294,12 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFOSNAP",
         "UOSNAP",
         "FIELDDISPLAY",
-        "FILEDIA",
-        "TRIMEXTENDMODE",
-        "SELECTIONCYCLING",
-        "UCSDETECT",
         "SURFACEASSOCIATIVITY",
-        "DGNIMPORTMODE",
-        "LAYOUTCREATEVIEWPORT",
-        "TXT2MTXTCOMBINEMTEXT",
-        "TXT2MTXTTEXTORDER",
-        "TXT2MTXTWORDWRAP",
-        "TXT2MTXTLINESPACING",
         "FIELDEVAL",
         "PDFIMPORTMODE",
         "PDFIMPORTFILTER",
         "PDFIMPORTLAYERS",
         "PDFIMPORTIMAGEPATH",
-        "PDFSHXLAYER",
-        "PDFSHXBESTFONT",
-        "PDFSHXTEXTSETTINGS",
         "XDWGFADECTL",
         "POINTCLOUDCLIPFRAME",
         "POINTCLOUDDENSITY",
@@ -909,10 +1335,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "SKTOLERANCE",
         "CLIPROMPTLINES",
         "COMMANDLINEFADETIME",
-        "COMMANDLINEOPACITY",
-        "MENUBAR",
-        "RIBBON",
-        "RIBBONCLOSE",
         "COLORTHEME",
         "SELECTIONAREA",
         "SELECTIONAREAOPACITY",
@@ -978,8 +1400,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "EXPORTSTEP",
         "EXPORTSTL",
         "EXTERNALREFERENCES",
-        "EXTERNALREFERENCESCLOSE",
-        "ERSTATE",
         "POINTCLOUDMANAGER",
         "POINTCLOUDMANAGERCLOSE",
         "EXTRIM",
@@ -1020,11 +1440,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "NEW",
         "QNEW",
         "OBJIMPORT",
-        "IMPORT",
-        "ACISIN",
-        "WMFIN",
-        "DGNIMPORT",
-        "-DGNIMPORT",
         "OPEN",
         "ORTHO",
         "P",
@@ -1063,6 +1478,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "ADDSELECTED",
         // Outline of origin planes, open sketch and solid bodies.
         "BROWSER",
+        "PROSPECTOR",
+        "TOOLSPACE",
         // Open and close a sketch: a drawing plane, a square-on view and
         // snapping, held together until the profile is done.
         "CREATESKETCH",
@@ -1080,14 +1497,11 @@ inventory::submit!(crate::command::CommandRegistration {
         "SHORTCUTS",
         "SSM",
         "STEPOUT",
-        "FBXEXPORT",
         "STLOUT",
         "STPOUT",
         "STYLE",
         "STYLESMANAGER",
         "TABLESTYLE",
-        "BAUTHORPALETTE",
-        "BAUTHORPALETTECLOSE",
         "TOOLPALETTES",
         "TP",
         "TS",
@@ -1100,7 +1514,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "USERI",
         "USERR",
         "VIEW",
-        "-VIEW",
         "VPORTS",
         "VS",
         "VW",
@@ -1113,7 +1526,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "XR",
         "XREF",
         "-XREF",
-        "-ATTACH",
         "XRELOAD",
         "ZOOM",
         "ZS",

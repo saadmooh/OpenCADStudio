@@ -34,12 +34,12 @@ pub fn prop_current_vertex() -> usize {
 /// through untouched. Per-entity grip code works in raw field space, so the
 /// dispatch layer converts: display grips OCS→WCS, incoming edits WCS→OCS.
 fn planar_ocs_normal(entity: &EntityType) -> Option<(f64, f64, f64)> {
-    // Arc, Circle and Solid grips are already world-space (their grip code
-    // places them through the OCS itself); converting them again mirrors
-    // them for a flipped normal.
     let n = match entity {
+        EntityType::Arc(e) => e.normal,
+        EntityType::Circle(e) => e.normal,
         EntityType::LwPolyline(e) => e.normal,
         EntityType::Polyline2D(e) => e.normal,
+        EntityType::Solid(e) => e.normal,
         EntityType::Text(e) => e.normal,
         EntityType::AttributeDefinition(e) => e.normal,
         EntityType::Hatch(e) => e.normal,
@@ -320,12 +320,6 @@ pub fn apply_color(entity: &mut EntityType, color: AcadColor) {
     let common = entity.common_mut();
     common.color_name = None;
     common.color_book_handle = None;
-}
-
-/// Like [`apply_color`], but keeps a colour-book identity (`BOOK$NAME`).
-pub fn apply_named_color(entity: &mut EntityType, color: AcadColor, name: Option<String>) {
-    apply_color(entity, color);
-    entity.common_mut().color_name = name;
 }
 
 pub fn apply_line_weight(entity: &mut EntityType, lw: LineWeight) {

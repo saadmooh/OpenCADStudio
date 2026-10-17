@@ -51,44 +51,6 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
             }
             BlockPaletteMsg::Refresh => self.refresh_block_palette(),
-            // Web: read the picked file's bytes and parse them right away —
-            // the picker's name-only path has nothing behind it to read later.
-            #[cfg(target_arch = "wasm32")]
-            BlockPaletteMsg::PickFile => {
-                return Task::perform(
-                    async {
-                        crate::io::pick_and_parse_web(
-                            crate::t!("Select Drawing to Insert as Block").as_ref(),
-                            crate::t!("DWG/DXF Files").as_ref(),
-                            &["dwg", "dxf", "DWG", "DXF"],
-                        )
-                        .await
-                        .and_then(|picked| picked.ok_or_else(|| "Cancelled".to_string()))
-                    },
-                    |r| Message::BlockPalette(BlockPaletteMsg::FilePickedDoc(r)),
-                );
-            }
-            #[cfg(target_arch = "wasm32")]
-            BlockPaletteMsg::FilePickedDoc(Ok((name, document))) => {
-                let stem = std::path::Path::new(&name)
-                    .file_stem()
-                    .map(|stem| stem.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "Block".to_string());
-                match self.import_document_block(document, stem, false) {
-                    Ok(name) => {
-                        self.refresh_block_palette();
-                        return self.start_palette_insert(&name, None);
-                    }
-                    Err(e) => self.command_line.push_error(&e),
-                }
-            }
-            #[cfg(target_arch = "wasm32")]
-            BlockPaletteMsg::FilePickedDoc(Err(e)) => {
-                if e != "Cancelled" {
-                    self.command_line.push_error(&e);
-                }
-            }
-            #[cfg(not(target_arch = "wasm32"))]
             BlockPaletteMsg::PickFile => {
                 return Task::perform(
                     async {
@@ -172,7 +134,7 @@ impl OpenCADStudio {
     /// BLOCKSPALETTE: open (expanded) on `tab`, or on the tab it was left on.
     pub(crate) fn open_blocks_palette(&mut self, tab: Option<Tab>) {
         self.show_block_palette = true;
-        self.dock_reveal(crate::ui::dock::PanelId::BlockPalette);
+        self.dock_expanded = Some(crate::ui::dock::PanelId::BlockPalette);
         self.show_block_palette_tab(tab.unwrap_or(self.block_palette.tab));
     }
 
@@ -424,33 +386,13 @@ impl OpenCADStudio {
         let i = self.active_tab;
         self.push_undo_snapshot(i, "INSERT");
         self.merge_dependencies(i, &deps);
-        let apps = crate::app::command_driver::clipboard::eed_app_map(
-            &self.tabs[i].scene.document,
-            &deps,
-        );
-        let mut created = Vec::new();
-        for def in &deps.blocks {
+        for def in deps.blocks {
             let scene = &mut self.tabs[i].scene;
-            let mut entities = def.entities.clone();
-            for entity in &mut entities {
-                crate::app::command_driver::clipboard::remap_eed_apps(entity, &apps);
-            }
             if redefine && def.name.eq_ignore_ascii_case(name) {
-                if let Err(err) = scene.redefine_block_raw(&def.name, def.base_point, entities) {
-                    self.command_line.push_error(&err);
-                    return Err(err);
-                }
+                scene.redefine_block_raw(&def.name, def.base_point, def.entities);
             } else if scene.document.block_records.get(&def.name).is_none() {
-                scene.define_block_raw(&def.name, def.base_point, entities);
-                created.push(def);
+                scene.define_block_raw(&def.name, def.base_point, def.entities);
             }
-        }
-        // A dynamic definition keeps its parameters and states.
-        use crate::app::command_driver::clipboard::{block_record_map, import_block_def_graph};
-        let document = &mut self.tabs[i].scene.document;
-        let records = block_record_map(document, &deps.blocks);
-        for def in created {
-            import_block_def_graph(document, def, &records);
         }
         self.tabs[i].scene.populate_meshes_from_document();
         self.tabs[i].dirty = true;
@@ -549,31 +491,20 @@ impl OpenCADStudio {
                 Tab::Current => {
                     let name = item.name();
                     let i = self.active_tab;
-                    let open_edits: Vec<codec::Handle> = self.tabs[i]
-                        .block_edits
-                        .iter()
-                        .map(|session| session.br_handle)
-                        .collect();
-                    self.push_undo_snapshot(i, format!("Delete block {name}"));
-                    let outcome = crate::scene::block_service::delete(
-                        &mut self.tabs[i].scene,
-                        &name,
-                        crate::scene::block_service::DeleteOptions {
-                            force: false,
-                            open_edits: &open_edits,
-                        },
-                    );
-                    match outcome {
-                        Ok(_) => {
-                            self.tabs[i].dirty = true;
-                            self.command_line
-                                .push_output(&crate::tf!("Block \"{name}\" removed."));
-                            self.refresh_block_palette();
-                        }
-                        Err(error) => {
-                            self.discard_last_undo_entry(i);
-                            self.command_line.push_error(&error.to_string());
-                        }
+                    let referenced = self.tabs[i].scene.document.entities().any(|e| {
+                        matches!(e, codec::EntityType::Insert(ins) if ins.block_name.eq_ignore_ascii_case(&name))
+                    });
+                    if referenced {
+                        self.command_line.push_error(&crate::tf!(
+                            "Block \"{name}\" is referenced in the drawing and cannot be removed."
+                        ));
+                    } else {
+                        self.push_undo_snapshot(i, "PURGE");
+                        crate::app::control::erase_block_definition(&mut self.tabs[i].scene, &name);
+                        self.tabs[i].dirty = true;
+                        self.command_line
+                            .push_output(&crate::tf!("Block \"{name}\" removed."));
+                        self.refresh_block_palette();
                     }
                 }
                 Tab::Recent | Tab::Favorites => {
@@ -645,7 +576,14 @@ impl OpenCADStudio {
         self.block_palette.source_tab_id = Some(self.tabs[i].id);
         self.block_palette.source_block_epoch = self.tabs[i].scene.block_epoch;
         let doc = &self.tabs[i].scene.document;
-        let annotative = |name: &str| crate::scene::annotative::block_is_annotative(doc, name);
+        let annotative = |name: &str| {
+            doc.block_records.get(name).is_some_and(|br| {
+                matches!(
+                    doc.get_entity(br.block_entity_handle),
+                    Some(codec::EntityType::Block(b)) if b.common.extended_data.records().iter().any(|r| r.application_name == "AcadAnnotative")
+                )
+            })
+        };
         let entries: Vec<BlockEntry> = names
             .into_iter()
             .map(|name| BlockEntry {

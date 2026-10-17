@@ -55,18 +55,6 @@ impl OpenCADStudio {
             return Task::none();
         };
         self.active_modal = None;
-        {
-            let mut remembered = crate::modules::insert::block_cmdline::defaults();
-            remembered.base_on_screen = state.base_point_specify_onscreen;
-            remembered.objects_on_screen = state.objects_specify_onscreen;
-            remembered.mode = state.object_mode;
-            remembered.allow_exploding = state.allow_exploding;
-            remembered.open_in_editor = state.open_in_editor;
-        }
-        self.block_definition_open_editor = state
-            .open_in_editor
-            .then(|| state.name.trim().to_string());
-        self.persist_settings_if_changed();
         let i = self.active_tab;
         let base_point = state.parse_base_point();
         let ucs = self.tabs[i].ucs_xform();
@@ -107,78 +95,6 @@ impl OpenCADStudio {
         }
     }
 
-    /// PASTESPEC with the formats on hand: the copied objects, and `text`
-    /// from the system clipboard once it has been read.
-    pub(in crate::app) fn paste_special_command(
-        &self,
-        i: usize,
-        text: Option<&str>,
-    ) -> Box<dyn CadCommand> {
-        let document = &self.tabs[i].scene.document;
-        let defaults = crate::scene::creation_style::current_text_defaults(document);
-        Box::new(
-            crate::modules::draw::clipboard::pastespec::PasteSpecCommand::new(
-                !self.clipboard.is_empty(),
-                text,
-                defaults.style_name,
-                defaults.height,
-            ),
-        )
-    }
-
-    /// Draw the selected objects, or else the existing definition the name
-    /// picks, in the Block Definition dialog's name card.
-    pub(in crate::app) fn refresh_block_definition_preview(&mut self) {
-        let scene = &self.tabs[self.active_tab].scene;
-        let Some(state) = self.block_definition.as_mut() else {
-            return;
-        };
-        state.preview = if state.selected_handles.is_empty() {
-            let name = state.name.trim();
-            state
-                .existing_names
-                .iter()
-                .find(|existing| existing.eq_ignore_ascii_case(name))
-                .map(|existing| scene.block_preview_wires(existing))
-                .unwrap_or_default()
-        } else {
-            state.empty_prompt = false;
-            let mut wires = Vec::new();
-            for handle in &state.selected_handles {
-                match scene.document.get_entity(*handle) {
-                    // A reference is drawn from its definition, placed by the
-                    // reference's transform.
-                    Some(codec::EntityType::Insert(insert)) => {
-                        let base = crate::scene::render_graph::block_base_point(
-                            &scene.document,
-                            &insert.block_name,
-                        );
-                        let xform =
-                            crate::scene::render_graph::insert_transform_with_base(insert, base);
-                        for mut wire in scene.block_preview_wires(&insert.block_name) {
-                            for p in &mut wire.points {
-                                if p.iter().all(|v| v.is_finite()) {
-                                    let q = xform.apply(codec::types::Vector3::new(
-                                        f64::from(p[0]),
-                                        f64::from(p[1]),
-                                        f64::from(p[2]),
-                                    ));
-                                    *p = [q.x as f32, q.y as f32, q.z as f32];
-                                }
-                            }
-                            wires.push(wire);
-                        }
-                    }
-                    Some(entity) => {
-                        wires.extend(scene.wires_for_entities(std::slice::from_ref(entity)))
-                    }
-                    None => {}
-                }
-            }
-            wires
-        };
-    }
-
     pub(super) fn dispatch_blocks(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
             // ── BASE — drawing insertion base point ───────────────────────
@@ -188,7 +104,7 @@ impl OpenCADStudio {
                 let rest = cmd.strip_prefix("BASE").unwrap_or("").trim();
                 if rest.is_empty() {
                     use crate::modules::insert::base_point::BaseCommand;
-                    let c = BaseCommand::new(self.current_insertion_base(i));
+                    let c = BaseCommand::new();
                     self.command_line.push_info(&c.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(c));
                 } else {
@@ -217,10 +133,20 @@ impl OpenCADStudio {
                                 .model_space_insertion_base = pt;
                         }
                         self.tabs[i].dirty = true;
-                        if z != 0.0 {
-                            self.command_line
-                                .push_output("Beware, Z insertion base is not zero.");
-                        }
+                        let space = if is_paper {
+                            "paper space"
+                        } else {
+                            "model space"
+                        };
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "Base point ({}, {}, {}) set for {space}.",
+                                nums[0],
+                                nums[1],
+                                z
+                            )
+                            .as_ref(),
+                        );
                     } else {
                         self.command_line
                             .push_error(crate::t!("Usage: BASE <x> <y> [z]").as_ref());
@@ -358,60 +284,6 @@ impl OpenCADStudio {
                 }
             }
 
-            // ARRAYEDIT — edit an associative array; a preselected one skips
-            // the pick.
-            "ARRAYEDIT" => {
-                use crate::modules::draw::modify::arrayedit::ArrayEditCommand;
-                let selected = self.tabs[i].scene.selected_handles_in_order();
-                let array = match selected.as_slice() {
-                    [handle] => Some(*handle),
-                    _ => None,
-                };
-                self.tabs[i].scene.deselect_all();
-                let command = ArrayEditCommand::new(array);
-                self.command_line.push_info(&command.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(command));
-            }
-
-            // ARRAYEDIT Source: edit the objects the array repeats in the
-            // Block Editor; every item follows when it is saved.
-            cmd if cmd.starts_with("ARRAYEDIT_SOURCE:") => {
-                let handle =
-                    codec::Handle::new(cmd["ARRAYEDIT_SOURCE:".len()..].parse().unwrap_or(0));
-                let document = &self.tabs[i].scene.document;
-                let source = crate::scene::assoc_array::array_of_insert(document, handle).and_then(
-                    |array| {
-                        document
-                            .block_records
-                            .iter()
-                            .find(|record| record.handle == array.source_block)
-                            .map(|record| record.name.clone())
-                    },
-                );
-                match source {
-                    Some(name) => {
-                        return Some(self.dispatch_command(&format!("BEDIT_OPEN:{name}")))
-                    }
-                    None => self.command_line.push_error(
-                        crate::t!("ARRAYEDIT: the selected object is not an associative array.")
-                            .as_ref(),
-                    ),
-                }
-            }
-
-            // PASTESPEC — offer the copied objects now; the system clipboard's
-            // text joins the formats once read (Message::PasteSpecial).
-            "PASTESPEC" => {
-                let command = self.paste_special_command(i, None);
-                let started = self.start_count_command(i, command);
-                #[cfg(target_arch = "wasm32")]
-                let read = Task::perform(crate::sys::read_clipboard_text(), Message::PasteSpecial);
-                #[cfg(not(target_arch = "wasm32"))]
-                let read = iced::clipboard::read_text()
-                    .map(|result| Message::PasteSpecial(result.ok().map(|text| (*text).clone())));
-                return Some(Task::batch([started, read]));
-            }
-
             // PASTEORIG — paste at the entities' original coordinates (no pick).
             "PASTEORIG" => {
                 if self.clipboard.is_empty() {
@@ -498,7 +370,8 @@ impl OpenCADStudio {
                             self.tabs[i].dirty = true;
                             let wires = self.tabs[i].scene.wires_for_entities(&self.clipboard);
                             use crate::modules::insert::insert_block::InsertBlockCommand;
-                            let cmd = InsertBlockCommand::new_for_block(name, wires, base);
+                            let cmd =
+                                InsertBlockCommand::new_for_block(name, wires, base.as_vec3());
                             self.command_line.push_info(&cmd.prompt());
                             self.tabs[i].active_cmd = Some(Box::new(cmd));
                         }
@@ -526,7 +399,26 @@ impl OpenCADStudio {
                     ),
                 );
                 self.active_modal = Some(crate::app::ModalKind::BlockDefinition);
-                self.refresh_block_definition_preview();
+            }
+
+            "-BLOCK" | "-BMAKE" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("-BLOCK");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    use crate::modules::insert::create_block::CreateBlockCommand;
+                    let cmd = CreateBlockCommand::new(handles);
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
             }
 
             cmd if cmd.starts_with("BLOCK_POINT_PICKED ") => {
@@ -562,7 +454,6 @@ impl OpenCADStudio {
                 }
                 self.tabs[i].active_cmd = None;
                 self.active_modal = Some(crate::app::ModalKind::BlockDefinition);
-                self.refresh_block_definition_preview();
             }
 
             cmd if cmd.starts_with("WBLOCK_POINT_PICKED ") => {
@@ -671,25 +562,108 @@ impl OpenCADStudio {
                 }
             }
 
-            // ATTSYNC <block>: the named block, without prompts.
+            // ATTSYNC <block> — reconcile every insert of <block> against the
+            // block's current attribute definitions: drop attributes whose tag
+            // no longer exists and add any newly-defined ones (keeping the values
+            // of attributes that remain).
+            "ATTSYNC" => {
+                use crate::command::ValuePromptCommand;
+                let c = ValuePromptCommand::new("ATTSYNC", "ATTSYNC  block name to sync:");
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
             cmd if cmd.starts_with("ATTSYNC ") => {
-                let arg = cmd.trim_start_matches("ATTSYNC").trim().to_string();
-                let document = &self.tabs[i].scene.document;
-                let table = crate::modules::insert::block_cmdline::BlockTable::of(document);
-                match table
-                    .attributed
-                    .iter()
-                    .find(|b| b.eq_ignore_ascii_case(&arg))
-                {
-                    Some(block) => {
-                        let block = block.clone();
-                        self.attsync_block(i, &block);
-                        self.command_line.push_output("ATTSYNC complete.");
-                    }
-                    None => self.command_line.push_output(&format!(
-                        "Block table contains no attributed block named {arg}."
-                    )),
+                let arg = cmd.trim_start_matches("ATTSYNC").trim();
+                let blocks = self.tabs[i].scene.custom_block_names();
+                if arg.is_empty() {
+                    self.command_line.push_info(
+                        crate::tf!(
+                            "Usage: ATTSYNC <block name>.  Blocks: {}",
+                            if blocks.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                blocks.join(", ")
+                            }
+                        )
+                        .as_ref(),
+                    );
+                    return Some(Task::none());
                 }
+                let Some(block) = blocks.iter().find(|b| b.eq_ignore_ascii_case(arg)).cloned()
+                else {
+                    self.command_line
+                        .push_error(crate::tf!("ATTSYNC: no block named \"{arg}\".").as_ref());
+                    return Some(Task::none());
+                };
+                // Gather the block's attribute definitions (tag, default value).
+                let doc = &self.tabs[i].scene.document;
+                let attdefs: Vec<(String, String)> = doc
+                    .block_records
+                    .get(&block)
+                    .map(|br| {
+                        br.entity_handles
+                            .iter()
+                            .filter_map(|h| doc.get_entity(*h))
+                            .filter_map(|e| match e {
+                                codec::EntityType::AttributeDefinition(a) => {
+                                    Some((a.tag.clone(), a.default_value.clone()))
+                                }
+                                _ => None,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let inserts: Vec<_> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter_map(|entity| match entity {
+                        codec::EntityType::Insert(insert)
+                            if insert.block_name.eq_ignore_ascii_case(&block)
+                                && !self.tabs[i].scene.is_layer_locked(insert.common.handle) =>
+                        {
+                            Some(insert.common.handle)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if inserts.is_empty() {
+                    self.command_line
+                        .push_error(crate::t!("ATTSYNC: no editable block references.").as_ref());
+                    return Some(Task::none());
+                }
+                self.push_undo_snapshot(i, "ATTSYNC");
+                let mut synced = 0usize;
+                let mut changes = Vec::new();
+                for handle in inserts {
+                    let Some(codec::EntityType::Insert(ins)) =
+                        self.tabs[i].scene.document.get_entity_mut(handle)
+                    else {
+                        continue;
+                    };
+                    ins.attributes
+                        .retain(|a| attdefs.iter().any(|(t, _)| t.eq_ignore_ascii_case(&a.tag)));
+                    for (tag, default) in &attdefs {
+                        if !ins
+                            .attributes
+                            .iter()
+                            .any(|a| a.tag.eq_ignore_ascii_case(tag))
+                        {
+                            ins.attributes.push(codec::entities::AttributeEntity::new(
+                                tag.clone(),
+                                default.clone(),
+                            ));
+                        }
+                    }
+                    synced += 1;
+                    changes.push((ins.common.handle, crate::scene::ChangeKind::Modified));
+                }
+                self.tabs[i].scene.bump_entities(&changes);
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(crate::tf!(
+                    "ATTSYNC: synchronised {synced} insert(s) of \"{block}\" against {} attribute definition(s).",
+                    attdefs.len()
+                ).as_ref());
             }
 
             // ADCENTER / CONTENTBROWSER — report the drawing's named content
@@ -749,15 +723,20 @@ impl OpenCADStudio {
                 self.open_blocks_palette(Some(tab));
             }
 
-            cmd if self.dispatch_pdf_shx_text(cmd, i) => {}
-            "PDFIMPORT" | "-PDFIMPORT" => {
+            // ATTMAN / BATTMAN — the Block Attribute Manager. Rather than a
+            // command-line listing, both route to the attribute editor
+            // (ATTEDIT): edit the selected block's attributes, or pick a block.
+            cmd if cmd == "ATTMAN"
+                || cmd == "BATTMAN"
+                || cmd.starts_with("ATTMAN ")
+                || cmd.starts_with("BATTMAN ") =>
+            {
+                self.open_attedit_dialog();
+            }
+
+            "PDFIMPORT" => {
                 use crate::command::CadCommand;
-                use crate::modules::insert::pdf_import::PdfImportCommand;
-                let command = if cmd == "-PDFIMPORT" {
-                    PdfImportCommand::command_line()
-                } else {
-                    PdfImportCommand::new()
-                };
+                let command = crate::modules::insert::pdf_import::PdfImportCommand::new();
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
@@ -860,7 +839,7 @@ impl OpenCADStudio {
                     .split_once(char::is_whitespace)
                     .map(|(verb, rest)| (verb.to_ascii_uppercase(), rest.trim()))
                     .unwrap_or_else(|| (cmd.to_ascii_uppercase(), ""));
-                if verb == "PDFATTACH" && rest.is_empty() && crate::sys::file_dia() {
+                if verb == "PDFATTACH" && rest.is_empty() {
                     return Some(Task::done(Message::PdfAttachPick));
                 }
                 let insunits = self.tabs[i].scene.document.header.insertion_units;
@@ -889,16 +868,16 @@ impl OpenCADStudio {
                     .collect();
                 let existing_blocks = self.tabs[i].scene.custom_block_names();
                 let default_unit = self.tabs[i].scene.document.header.insertion_units;
-                // "new block" in the drawing's folder, or in Documents for an
-                // unsaved drawing; the file type is added when it is written.
-                let folder = self.tabs[i]
+                let default_folder = self.tabs[i]
                     .current_path
                     .as_ref()
-                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                    .or_else(crate::sys::documents_dir);
-                let default_path = match folder {
-                    Some(folder) => folder.join("new block").to_string_lossy().to_string(),
-                    None => "new block".to_string(),
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let default_path = if default_folder.is_empty() {
+                    "new_block.dwg".to_string()
+                } else {
+                    format!("{}/new_block.dwg", default_folder.replace('\\', "/"))
                 };
                 self.wblock = Some(crate::ui::window::wblock::WblockState::new(
                     existing_blocks,
@@ -942,30 +921,28 @@ impl OpenCADStudio {
                 }
             }
 
-            // EXTERNALREFERENCES opens the docked External References panel
-            // (an open one stays open); EXTERNALREFERENCESCLOSE closes it.
+            // EXTERNALREFERENCES — toggle the docked External References panel.
             // (XREFMAN was a provisional name and is not kept, not even as an
             // alias.) The XREF command below is untouched.
             "EXTERNALREFERENCES" => {
-                self.show_external_references = true;
-                // Always open expanded so the panel is immediately usable;
-                // dock it on the right if the user closed it from the layout.
-                self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);
-                self.refresh_xref_manager();
-            }
-            "EXTERNALREFERENCESCLOSE" => self.show_external_references = false,
-            // ERSTATE (read only): whether the panel is open.
-            cmd if cmd
-                .strip_prefix("SETVAR ")
-                .unwrap_or(cmd)
-                .split_whitespace()
-                .next()
-                .is_some_and(|name| name.eq_ignore_ascii_case("ERSTATE")) =>
-            {
-                self.command_line.push_output(&format!(
-                    "ERSTATE = {} (read only)",
-                    u8::from(self.show_external_references)
-                ));
+                self.show_external_references ^= true;
+                if self.show_external_references {
+                    // Always open expanded so the panel is immediately usable;
+                    // dock it on the right if the user closed it from the layout.
+                    if self
+                        .dock
+                        .location(crate::ui::dock::PanelId::ExternalReferences)
+                        .is_none()
+                    {
+                        self.dock.dock(
+                            crate::ui::dock::PanelId::ExternalReferences,
+                            crate::app::config::DockSide::Right,
+                            usize::MAX,
+                        );
+                    }
+                    self.dock_expanded = Some(crate::ui::dock::PanelId::ExternalReferences);
+                    self.refresh_xref_manager();
+                }
             }
 
             cmd if cmd.eq_ignore_ascii_case("XREF")
@@ -1128,7 +1105,7 @@ impl OpenCADStudio {
                                 .filter(|br| reload_keys.contains(&br.handle.value()))
                                 .map(|br| br.handle)
                                 .collect();
-                            let infos = crate::io::xref::resolve_xrefs_for_keys(
+                            let (infos, _dropped) = crate::io::xref::resolve_xrefs_for_keys(
                                 &mut self.tabs[i].scene.document,
                                 base_dir,
                                 &handles,
@@ -1646,20 +1623,9 @@ impl OpenCADStudio {
             "XRELOAD" => {
                 // Reload all xrefs for the current drawing. Every direct key
                 // leaves the session-unloaded set (reloaded content is live
-                // again) with fresh stat baselines on the next refresh. Web:
-                // xrefs re-read from the in-session bytes registry, so an
-                // unsaved drawing reloads too; native needs the drawing's own
-                // folder for relative xref paths.
-                #[cfg(target_arch = "wasm32")]
-                let base_dir: Option<std::path::PathBuf> = Some(std::path::PathBuf::new());
-                #[cfg(not(target_arch = "wasm32"))]
-                let base_dir: Option<std::path::PathBuf> = self.tabs[i]
-                    .current_path
-                    .as_ref()
-                    .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
-                if let Some(base_dir) = base_dir {
-                    {
-                        let base_dir: &std::path::Path = &base_dir;
+                // again) with fresh stat baselines on the next refresh.
+                if let Some(path) = &self.tabs[i].current_path.clone() {
+                    if let Some(base_dir) = path.parent() {
                         let reload_keys: Vec<u64> = crate::io::xref::collect_entries_with_prev(
                             &self.tabs[i].scene.document,
                             base_dir,
@@ -1674,9 +1640,9 @@ impl OpenCADStudio {
                             self.tabs[i].xref_unloaded.remove(key);
                             self.tabs[i].xref_stat_cache.remove(key);
                         }
-                        let infos = crate::io::xref::resolve_xrefs(
+                        let (infos, _dropped) = crate::io::xref::resolve_xrefs(
                             &mut self.tabs[i].scene.document,
-                            &base_dir,
+                            base_dir,
                         );
                         // `resolve_xrefs` re-merges ALL references — refresh stat
                         // baselines for every currently-Loaded entry so no row
@@ -1697,17 +1663,8 @@ impl OpenCADStudio {
                             }
                         }
                         for info in &infos {
-                            // Web: unresolved references surface once below,
-                            // with the drop hint, instead of a filesystem path
-                            // no browser can open.
-                            #[cfg(target_arch = "wasm32")]
-                            if info.status == crate::io::xref::XrefStatus::NotFound {
-                                continue;
-                            }
                             self.report_xref_status(info);
                         }
-                        #[cfg(target_arch = "wasm32")]
-                        self.warn_unresolved_xrefs(&infos);
                         self.post_ref_op(i);
                     }
                 } else {
@@ -1796,18 +1753,28 @@ mod tests {
             .join("\n")
     }
 
-    // ATTMAN and BATTMAN open the Block Attribute Manager. A drawing without
-    // attributed blocks has nothing to manage, which both report instead of
-    // opening it.
+    // ATTMAN and BATTMAN are the Block Attribute Manager; this build routes both
+    // to the attribute editor (ATTEDIT) instead of the old command-line listing.
+    // With nothing selected they start the same interactive pick as ATTEDIT,
+    // byte for byte, and never emit the old "no matching block" listing text.
     #[test]
-    fn attman_and_battman_report_a_drawing_without_attributed_blocks() {
-        for command in ["ATTMAN", "BATTMAN"] {
-            let output = run_capture(&mut fresh_app(), command);
-            assert_eq!(
-                output, "This drawing contains no attributed blocks.",
-                "{command}"
-            );
-        }
+    fn attman_and_battman_route_to_attedit() {
+        let attedit = run_capture(&mut fresh_app(), "ATTEDIT");
+        let attman = run_capture(&mut fresh_app(), "ATTMAN");
+        let battman = run_capture(&mut fresh_app(), "BATTMAN");
+
+        assert_eq!(
+            attman, attedit,
+            "ATTMAN must behave like ATTEDIT, got: {attman:?} vs {attedit:?}"
+        );
+        assert_eq!(
+            battman, attedit,
+            "BATTMAN must behave like ATTEDIT, got: {battman:?} vs {attedit:?}"
+        );
+        assert!(
+            !attman.contains("no matching block"),
+            "ATTMAN must not run the old command-line listing, got: {attman:?}"
+        );
     }
 
     #[test]
@@ -1817,7 +1784,7 @@ mod tests {
         let _ = app.run_command_line("BLOCKPALETTE");
         assert!(app.show_block_palette);
         assert!(
-            app.dock_peek == Some(crate::ui::dock::PanelId::BlockPalette),
+            app.dock_expanded == Some(crate::ui::dock::PanelId::BlockPalette),
             "palette must open expanded, not as the collapsed bar"
         );
         // BLOCKSPALETTE only opens; BLOCKSPALETTECLOSE closes.

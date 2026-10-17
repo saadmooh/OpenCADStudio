@@ -1331,19 +1331,6 @@ impl Grippable for Dimension {
                 }
             }
 
-            // A radius turns about its centre the same way: the point on the
-            // arc follows the text instead of the line kinking to reach it.
-            if let Dimension::Radius(d) = self {
-                let center = d.angle_vertex;
-                let radius = d.measurement();
-                let offset = d.base.text_middle_point - center;
-                if offset.length_squared() > 1e-24 && radius > 1e-12 {
-                    d.definition_point = center + offset.normalize() * radius;
-                    d.base.definition_point = d.definition_point;
-                    d.base.actual_measurement = d.measurement();
-                }
-            }
-
             // Dragging the text grip pins it to a user-defined location, so it
             // no longer follows the style (DIMTAD). See #94.
             self.base_mut().text_user_positioned = true;
@@ -1756,12 +1743,6 @@ pub(crate) fn resolved_dimension_style(
         }
     }
 
-    // An annotative style sizes its features by the annotation scale; the
-    // DIMSCALE it still stores is inert.
-    if style.annotative {
-        style.dimscale = 0.0;
-    }
-
     // Negative DIMLFAC applies only in paper space, and there only to a
     // dimension that measures model space through a viewport. The associative
     // record stores the applied factor; zero marks paper-space geometry whose
@@ -1953,6 +1934,15 @@ pub fn style_sections(
         }
     };
 
+    let mut arrow_options: Vec<String> = std::iter::once("Closed filled".to_string())
+        .chain(
+            document
+                .block_records
+                .iter()
+                .map(|record| record.name.clone())
+                .filter(|name| !name.is_empty()),
+        )
+        .collect();
     let mut linetype_options: Vec<String> = document
         .line_types
         .iter()
@@ -1992,9 +1982,11 @@ pub fn style_sections(
     } else {
         arrow_name(ov::DIMBLK2, s.dimblk2, &s.dimblk2_name)
     };
-    // The standard arrowheads, then any user arrow block in use. (#1820)
-    let arrow_options =
-        crate::entities::arrowheads::options([&arrow_1, &arrow_2].map(String::as_str));
+    for current in [&arrow_1, &arrow_2] {
+        if !arrow_options.contains(current) {
+            arrow_options.push(current.clone());
+        }
+    }
     for current in [
         linetype(ov::DIMLTYPE, s.dimltex_handle),
         linetype(ov::DIMLTEX1, s.dimltex1_handle),
@@ -3248,7 +3240,7 @@ pub(crate) fn materialize_large_radial_text_position(
     let Some(EntityType::Dimension(dimension)) = document.get_entity(handle) else {
         return;
     };
-    if !matches!(&**dimension, Dimension::LargeRadial(_)) || dimension.base().text_user_positioned {
+    if !matches!(dimension, Dimension::LargeRadial(_)) || dimension.base().text_user_positioned {
         return;
     }
     let source = document.dim_styles.iter().find(|style| {
@@ -3262,8 +3254,8 @@ pub(crate) fn materialize_large_radial_text_position(
         .map(|style| resolved_dimension_style(style, dimension, document))
         .map(|style| styled_dimension_text_position(dimension, &style, 1.0))
         .unwrap_or_else(|| dimension_text_pos_f64(dimension, None, 2.5, 1.0));
-    if let Some(Dimension::LargeRadial(radial)) =
-        document.get_entity_mut(handle).and_then(as_dimension_mut)
+    if let Some(EntityType::Dimension(Dimension::LargeRadial(radial))) =
+        document.get_entity_mut(handle)
     {
         radial.base.text_middle_point = position;
     }
@@ -3391,13 +3383,16 @@ fn choice_value(selected: &str, options: &[&str]) -> crate::scene::model::object
     }
 }
 
-/// The arrowhead picker's name for `handle`; `fallback` names a block the
-/// drawing does not hold.
 fn block_name(document: &CadDocument, handle: codec::Handle, fallback: &str) -> String {
-    if !handle.is_null() && !document.block_records.iter().any(|b| b.handle == handle) {
-        return crate::entities::arrowheads::label_for_block(fallback);
+    if handle.is_null() {
+        return "Closed filled".to_string();
     }
-    crate::entities::arrowheads::label(document, handle)
+    document
+        .block_records
+        .iter()
+        .find(|record| record.handle == handle)
+        .map(|record| record.name.clone())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn linetype_name(document: &CadDocument, handle: codec::Handle) -> String {
@@ -3603,7 +3598,6 @@ fn apply_dimension_jog(
 }
 
 pub trait DimensionTess {
-    #[allow(clippy::too_many_arguments)]
     fn tessellate(
         &self,
         document: &CadDocument,
@@ -3617,12 +3611,10 @@ pub trait DimensionTess {
         bg_color: [f32; 4],
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
-        reference_only: &rustc_hash::FxHashSet<codec::Handle>,
     ) -> Vec<WireModel>;
 }
 
 impl DimensionTess for Dimension {
-    #[allow(clippy::too_many_arguments)]
     fn tessellate(
         &self,
         document: &CadDocument,
@@ -3636,7 +3628,6 @@ impl DimensionTess for Dimension {
         bg_color: [f32; 4],
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
-        reference_only: &rustc_hash::FxHashSet<codec::Handle>,
     ) -> Vec<WireModel> {
         tessellate_dimension_inner(
             document,
@@ -3651,12 +3642,10 @@ impl DimensionTess for Dimension {
             bg_color,
             view_aabb,
             world_per_pixel,
-            reference_only,
         )
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn tessellate_dimension_inner(
     document: &CadDocument,
     handle: Handle,
@@ -3673,7 +3662,6 @@ fn tessellate_dimension_inner(
     bg_color: [f32; 4],
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
-    reference_only: &rustc_hash::FxHashSet<codec::Handle>,
 ) -> Vec<WireModel> {
     if let Dimension::Arc(arc) = dim {
         if let Some((local_arc, normal)) = arc_dimension_in_ocs(arc) {
@@ -3690,7 +3678,6 @@ fn tessellate_dimension_inner(
                 bg_color,
                 None,
                 world_per_pixel,
-                reference_only,
             );
             for wire in &mut wires {
                 map_wire_ocs_to_wcs(wire, normal);
@@ -3713,7 +3700,6 @@ fn tessellate_dimension_inner(
                 bg_color,
                 None,
                 world_per_pixel,
-                reference_only,
             );
             for wire in &mut wires {
                 map_wire_ocs_to_wcs(wire, normal);
@@ -3735,7 +3721,6 @@ fn tessellate_dimension_inner(
             bg_color,
             None,
             world_per_pixel,
-            reference_only,
         );
         for wire in &mut wires {
             map_wire_ocs_to_wcs(wire, normal);
@@ -3910,7 +3895,6 @@ fn tessellate_dimension_inner(
             dimtofl: style.map(|s| s.dimtofl).unwrap_or(false),
             text_position: text_layout.position,
             horizontal_text: text_layout.horizontal,
-            text_lifted: style.map(|s| s.dimtad).unwrap_or(1) != 0,
             text_movement: style.map(|s| s.dimtmove).unwrap_or(0),
             text_break: text_layout.break_box,
             leader_anchor: style
@@ -4436,7 +4420,6 @@ fn tessellate_dimension_inner(
             view_aabb,
             world_per_pixel,
             text_color,
-            reference_only,
         );
         for mut w in text_wires {
             w.name = name.clone();
@@ -4454,7 +4437,6 @@ fn tessellate_dimension_inner(
                 view_aabb,
                 world_per_pixel,
                 text_color,
-                reference_only,
             );
             for mut w in tol_wires {
                 w.name = name.clone();
@@ -4834,8 +4816,6 @@ struct DimLineParams {
     dimtofl: bool,
     text_position: Vec3,
     horizontal_text: bool,
-    /// DIMTAD lifts aligned text off its dimension line.
-    text_lifted: bool,
     text_movement: i16,
     text_break: Option<TextBreak>,
     /// DIMTMOVE 1: the point the file stores is where the leader's hook starts,
@@ -5406,25 +5386,19 @@ fn append_linear_dimension(
     let text_beyond_d2 = text_span
         .filter(|(lo, _)| *lo > gap as f64 && !hooks_out_horizontally)
         .map(|(lo, _)| (lo - gap as f64) as f32);
-    // DIMTMOVE=2 leaves moved text outside the dimension without a fine
-    // leader or an extension that chases the text. Keep genuine arrow-fit
-    // stubs, but do not turn a user-placed text point into another segment.
-    let chase_text = params.text_movement != 2;
-    let beyond_d1 = chase_text.then_some(text_beyond_d1).flatten();
-    let beyond_d2 = chase_text.then_some(text_beyond_d2).flatten();
-    if (arrows_outside && !params.dimsoxd) || beyond_d1.is_some() || beyond_d2.is_some() {
-        if !suppress.dim1 && (arrows_outside || beyond_d1.is_some()) {
+    if (arrows_outside && !params.dimsoxd) || text_beyond_d1.is_some() || text_beyond_d2.is_some() {
+        if !suppress.dim1 && (arrows_outside || text_beyond_d1.is_some()) {
             add_segment(
                 &mut g.dim_lines,
-                d1 - dir_d1_to_d2 * reach(stub, beyond_d1),
+                d1 - dir_d1_to_d2 * reach(stub, text_beyond_d1),
                 d1,
             );
         }
-        if !suppress.dim2 && (arrows_outside || beyond_d2.is_some()) {
+        if !suppress.dim2 && (arrows_outside || text_beyond_d2.is_some()) {
             add_segment(
                 &mut g.dim_lines,
                 d2,
-                d2 + dir_d1_to_d2 * reach(stub, beyond_d2),
+                d2 + dir_d1_to_d2 * reach(stub, text_beyond_d2),
             );
         }
     }
@@ -5441,11 +5415,7 @@ fn append_linear_dimension(
     // Horizontal text outside the extension lines of a dimension that is not
     // horizontal itself: the dimension line runs on to the text's height and
     // turns a hook one arrow long toward the text, which sits against it.
-    if params.text_movement != 2
-        && params.horizontal_text
-        && !params.ticks
-        && dir_d1_to_d2.y.abs() > 1e-3
-    {
+    if params.horizontal_text && !params.ticks && dir_d1_to_d2.y.abs() > 1e-3 {
         if let Some(text_break) = params.text_break {
             let along = (text_break.center - d1).dot(dir_d1_to_d2);
             let outside = if along < 0.0 {
@@ -5519,14 +5489,6 @@ fn append_radial_leader(
             add_segment(&mut g.dim_lines, hook_start, text_edge);
         } else {
             add_segment(&mut g.dim_lines, tip, text_edge);
-        }
-    } else if params.text_lifted {
-        // Text above or below the line: the line carries on out from the
-        // rim, under the whole text to its far end.
-        let along = normalized_or(direction, Vec3::X);
-        let reach = (text - tip).dot(along) + params.text_width * 0.5;
-        if reach > 0.0 {
-            add_segment(&mut g.dim_lines, tip, tip + along * reach);
         }
     } else {
         let toward = normalized_or(text - tip, Vec3::X);
@@ -6491,7 +6453,7 @@ fn dimension_text_entity(
         }
         mtext.normal = base.normal;
         mtext.common = base.common.clone();
-        return Some(EntityType::MText(Box::new(mtext)));
+        return Some(EntityType::MText(mtext));
     }
 
     let value = if style.is_some_and(|style| style.dimtxtdirection) {
@@ -7150,7 +7112,7 @@ fn dimension_tolerance_entity(
         mtext.style = primary_style;
         mtext.attachment_point = codec::entities::AttachmentPoint::MiddleCenter;
         mtext.common = primary_common;
-        return Some(EntityType::MText(Box::new(mtext)));
+        return Some(EntityType::MText(mtext));
     }
 
     let mut t = Text::with_value(tol, pos)
@@ -7857,7 +7819,10 @@ fn radial_leader_tip(dim: &Dimension, text: Vector3) -> Vector3 {
 /// A dimensional constraint's dynamic dimension: the reference keeps it on
 /// its own hidden layer and draws it by its own rules.
 fn dynamic_constraint_dimension(dim: &Dimension) -> bool {
-    crate::scene::parametric_constraints::is_dynamic_dimension_layer(&dim.base().common.layer)
+    dim.base()
+        .common
+        .layer
+        .eq_ignore_ascii_case(crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER)
 }
 
 /// How far a radial leader runs out from the rim before its hook, and how
@@ -7890,45 +7855,16 @@ fn diameter_point_on_leader(
     point: Vector3,
     offset: f64,
 ) -> bool {
-    point_on_line(d.angle_vertex, d.definition_point, point, offset)
-}
-
-/// Whether `point` lies on the line through `a` and `b` rather than an
-/// `offset` (a DIMTAD lift) away from it.
-fn point_on_line(a: Vector3, b: Vector3, point: Vector3, offset: f64) -> bool {
-    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let (dx, dy) = (
+        d.definition_point.x - d.angle_vertex.x,
+        d.definition_point.y - d.angle_vertex.y,
+    );
     let length = dx.hypot(dy);
     if length < 1e-12 {
         return true;
     }
-    let across = ((point.x - a.x) * dy - (point.y - a.y) * dx) / length;
+    let across = ((point.x - d.angle_vertex.x) * dy - (point.y - d.angle_vertex.y) * dx) / length;
     across.abs() < offset.abs() * 0.5
-}
-
-/// `point` on the line through `a` and `b`, lifted `offset` to the side the
-/// line's readable text stands on (below for DIMTAD 4).
-fn lift_off_line(a: Vector3, b: Vector3, point: Vector3, offset: f64, dimtad: i16) -> Vector3 {
-    let (dx, dy) = (b.x - a.x, b.y - a.y);
-    let len = (dx * dx + dy * dy).sqrt().max(1e-12);
-    // Match the readable orientation used by text_on_dim_line().
-    let (mut nx, mut ny) = (dx / len, dy / len);
-    if nx < 0.0 || (nx == 0.0 && ny < 0.0) {
-        nx = -nx;
-        ny = -ny;
-    }
-    let (px, py) = (-ny, nx);
-    let sign = if dimtad == 4 { -1.0 } else { 1.0 };
-    Vector3::new(
-        point.x + px * offset * sign,
-        point.y + py * offset * sign,
-        point.z,
-    )
-}
-
-/// DIMTOH / DIMTIH turn this dimension's text horizontal where it sits.
-fn dimension_text_reads_horizontal(dim: &Dimension, style: Option<&DimStyle>) -> bool {
-    let outside = dimension_text_is_outside(dim, style);
-    style.is_some_and(|style| (outside && style.dimtoh) || (!outside && style.dimtih))
 }
 
 fn dimension_text_pos_f64(
@@ -7982,18 +7918,6 @@ fn dimension_text_pos_f64(
                 let side = if point.x >= tip.x { 1.0 } else { -1.0 };
                 Vector3::new(point.x + side * (arrow + text_w * 0.5), point.y, point.z)
             }
-            // A radius places its text where it was clicked, on the line
-            // through the centre and the arc point; DIMTAD lifts aligned text
-            // off that line as it does on a diameter, and the line runs on
-            // under it. A point already off the line is the text's own
-            // middle, as a file saved elsewhere writes it. (#1675)
-            Dimension::Radius(d)
-                if dimtad != 0
-                    && !dimension_text_reads_horizontal(dim, style)
-                    && point_on_line(d.angle_vertex, d.definition_point, point, perp_off) =>
-            {
-                lift_off_line(d.angle_vertex, d.definition_point, point, perp_off, dimtad)
-            }
             // A diameter whose text the user dragged keeps the grip point on
             // the leader and lifts the text by the DIMTAD offset (#1323).
             // A stored point already standing off the leader is the text's
@@ -8004,7 +7928,22 @@ fn dimension_text_pos_f64(
                     && dimtad != 0
                     && diameter_point_on_leader(d, point, perp_off) =>
             {
-                lift_off_line(d.angle_vertex, d.definition_point, point, perp_off, dimtad)
+                let dx = d.definition_point.x - d.angle_vertex.x;
+                let dy = d.definition_point.y - d.angle_vertex.y;
+                let len = (dx * dx + dy * dy).sqrt().max(1e-12);
+                // Match the readable orientation used by text_on_dim_line().
+                let (mut nx, mut ny) = (dx / len, dy / len);
+                if nx < 0.0 || (nx == 0.0 && ny < 0.0) {
+                    nx = -nx;
+                    ny = -ny;
+                }
+                let (px, py) = (-ny, nx);
+                let perp_sign = if dimtad == 4 { -1.0 } else { 1.0 };
+                Vector3::new(
+                    point.x + px * perp_off * perp_sign,
+                    point.y + py * perp_off * perp_sign,
+                    point.z,
+                )
             }
             _ => point,
         };
@@ -8271,7 +8210,6 @@ pub(crate) fn baked_large_radial_geometry(
             dimtofl: style.is_some_and(|style| style.dimtofl),
             text_position: text.position,
             horizontal_text: text.horizontal,
-            text_lifted: style.map(|style| style.dimtad).unwrap_or(1) != 0,
             text_movement: style.map(|style| style.dimtmove).unwrap_or(0),
             text_break: text.break_box,
             leader_anchor: None,
@@ -8950,7 +8888,6 @@ mod linear_transform_tests {
             [0.0, 0.0, 0.0, 1.0],
             None,
             None,
-            &rustc_hash::FxHashSet::default(),
         );
         let mut points = Vec::new();
         for wire in &wires {
@@ -9282,7 +9219,6 @@ mod layout_parity_tests {
             [0.0, 0.0, 0.0, 1.0],
             None,
             None,
-            &rustc_hash::FxHashSet::default(),
         );
         let mut points = Vec::new();
         let mut fills = 0;
@@ -9361,43 +9297,6 @@ mod layout_parity_tests {
         assert!(
             points.iter().all(|p| p.y <= top + 0.01 && p.y >= -0.01),
             "centred text leaves the arrows inside"
-        );
-    }
-
-    #[test]
-    fn dimtmove_two_does_not_chase_moved_linear_text() {
-        let make = |movement| {
-            let mut document = document();
-            document.dim_styles.get_mut("Standard").unwrap().dimtmove = movement;
-            let mut d = DimensionLinear::horizontal(
-                Vector3::new(0.0, 0.0, 0.0),
-                Vector3::new(0.8, 0.0, 0.0),
-            );
-            d.definition_point = Vector3::new(0.0, 2.0, 0.0);
-            d.base.text_middle_point = Vector3::new(2.5, 2.0, 0.0);
-            drawn(&document, &Dimension::Linear(d)).0
-        };
-        let with_leader = make(1);
-        let without_leader = make(2);
-        assert!(
-            with_leader.len() > without_leader.len(),
-            "DIMTMOVE=1 should add a leader: {} vs {} points",
-            with_leader.len(),
-            without_leader.len()
-        );
-        // DIMTMOVE=1 reaches the moved text; DIMTMOVE=2 keeps only the
-        // legitimate arrow-outside stub and never chases the text.
-        assert!(
-            with_leader
-                .iter()
-                .any(|p| p.x >= 2.0 && (p.y - 2.0).abs() <= 1e-6),
-            "DIMTMOVE=1 should reach the moved text: {with_leader:?}"
-        );
-        assert!(
-            without_leader
-                .iter()
-                .all(|p| p.x <= 1.5 || (p.y - 2.0).abs() > 1e-6),
-            "DIMTMOVE=2 must not reach the moved text: {without_leader:?}"
         );
     }
 
@@ -9557,24 +9456,5 @@ mod layout_parity_tests {
             points.iter().any(|p| (p.y - 0.8).abs() < 1e-6),
             "hook at the text height"
         );
-    }
-}
-
-/// The dimension an entity is, if it is one. The variant holds it boxed, so
-/// a pattern cannot reach into it; match on this instead.
-pub(crate) fn as_dimension(entity: &codec::EntityType) -> Option<&codec::entities::Dimension> {
-    match entity {
-        codec::EntityType::Dimension(dimension) => Some(dimension),
-        _ => None,
-    }
-}
-
-/// [`as_dimension`], mutably.
-pub(crate) fn as_dimension_mut(
-    entity: &mut codec::EntityType,
-) -> Option<&mut codec::entities::Dimension> {
-    match entity {
-        codec::EntityType::Dimension(dimension) => Some(dimension),
-        _ => None,
     }
 }

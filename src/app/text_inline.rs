@@ -276,24 +276,22 @@ impl super::OpenCADStudio {
                     t.style = cur_style;
                 }
             }
-            // TEXT asks an annotative style for the paper height; the entity
-            // stores the model height of the scale it is created at.
-            let annotative = command_creation
-                && crate::scene::annotative::text_style_is_annotative(
+            if command_creation {
+                let annotation_multiplier = if crate::scene::annotative::text_style_is_annotative(
                     &self.tabs[i].scene.document,
                     &t.style,
-                );
-            let paper_height = t.height;
-            if annotative {
-                t.height *= self.tabs[i].scene.creation_annotation_multiplier();
-            }
-            if command_creation {
+                ) {
+                    self.tabs[i].scene.creation_annotation_multiplier()
+                } else {
+                    1.0
+                };
                 let display_height = crate::entities::text::text_run_placement_at_scale(
                     &t,
                     &self.tabs[i].scene.document,
-                    1.0,
+                    annotation_multiplier as f32,
                 )
-                .height as f64;
+                .height as f64
+                    * annotation_multiplier;
                 if let Some(command) = self.tabs[i].suspended_cmd.as_mut() {
                     command.on_editor_display_height(display_height);
                 }
@@ -313,22 +311,9 @@ impl super::OpenCADStudio {
                     codec::entities::TextHorizontalAlignment::Aligned
                 )
             {
-                self.tabs[i].scene.document.header.text_height = paper_height;
+                self.tabs[i].scene.document.header.text_height = t.height;
             }
-            let handle = self.commit_entity_handle(plane.place_entity(EntityType::Text(t)));
-            if annotative {
-                let scale = self.tabs[i].scene.creation_annotation_scale_handle();
-                if let (Some(handle), Some(scale)) = (handle, scale) {
-                    crate::scene::annotative::create_annotation_context(
-                        &mut self.tabs[i].scene.document,
-                        handle,
-                        scale,
-                    );
-                    self.tabs[i]
-                        .scene
-                        .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
-                }
-            }
+            let _ = self.commit_entity_handle(plane.place_entity(EntityType::Text(t)));
             self.tabs[i].dirty = true;
         }
         self.refresh_properties();

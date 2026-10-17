@@ -29,10 +29,6 @@ impl OpenCADStudio {
         &self,
         i: usize,
     ) -> Option<(glam::DVec3, glam::DVec3)> {
-        // A typed `<angle` locks the way from the last point.
-        if let (Some(dir), Some(base)) = (self.angle_override, self.last_point) {
-            return Some((base, dir));
-        }
         // OTRACK already exposes its acquired world-space ray.
         if let Some((base, dir)) = self.otrack_active {
             return Some((base, dir));
@@ -686,7 +682,6 @@ impl OpenCADStudio {
                         self.dyn_coord_absolute = false;
                         self.sync_dyn_fields();
                         self.reset_tracking_after_point();
-                        self.snapper.clear_override();
                         self.snapper.remember_distance_reference(dir);
                         self.push_ucs_to_cmd(i);
                         let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
@@ -760,7 +755,6 @@ impl OpenCADStudio {
         self.dyn_coord_absolute = false;
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
-        self.snapper.clear_override();
         self.push_ucs_to_cmd(i);
         let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
         for f in self.tabs[i].dyn_fields.iter_mut() {
@@ -798,16 +792,10 @@ impl OpenCADStudio {
             }
         }
         let cur = self.tabs[i].last_cursor_world;
-        let tab = &mut self.tabs[i];
-        let previews = tab
+        let previews = self.tabs[i]
             .active_cmd
             .as_mut()
-            .map(|c| {
-                let mut wires = c.on_preview_wires(cur);
-                let entities = c.preview_entities(&tab.scene.document, cur);
-                wires.extend(tab.scene.wires_for_entities(&entities));
-                wires
-            })
+            .map(|c| c.on_preview_wires(cur))
             .unwrap_or_default();
         let preview_hidden = self.tabs[i]
             .active_cmd

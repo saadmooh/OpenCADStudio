@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::host::{CommandSource, CommandStep, HostSettingValue};
 use crate::manifest::ApiVersion;
-use crate::ribbon::owned::{OwnedEntityClasses, OwnedPluginManifest, OwnedRibbonGroup};
+use crate::ribbon::owned::{OwnedPluginManifest, OwnedRibbonGroup};
 
 pub use crate::host::PreviewWire;
 pub use codec::xdata::{ExtendedDataRecord, XDataValue};
@@ -200,37 +200,6 @@ pub enum PluginRequest {
     RunCommand {
         request: crate::host::CommandRequest,
     },
-    /// V8 (additive): create an XRecord under a named-object-dictionary path.
-    CreateXRecord {
-        dictionary_path: Vec<String>,
-        name: String,
-        entries: Vec<crate::host::XRecordEntry>,
-    },
-    /// V8 (additive): read the entries of an existing XRecord.
-    ReadXRecord {
-        dictionary_path: Vec<String>,
-        name: String,
-    },
-    /// V8 (additive): replace the entries of an existing XRecord.
-    UpdateXRecord {
-        dictionary_path: Vec<String>,
-        name: String,
-        entries: Vec<crate::host::XRecordEntry>,
-    },
-    /// V8 (additive): delete an XRecord and its dictionary entry.
-    DeleteXRecord {
-        dictionary_path: Vec<String>,
-        name: String,
-    },
-    /// V8 (additive): list the XRecord names under a dictionary path.
-    ListXRecords {
-        dictionary_path: Vec<String>,
-    },
-    /// V9 (additive): mark an entity reference-only (plugin-owned display data).
-    SetReferenceOnly {
-        handle: Handle,
-        reference_only: bool,
-    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -267,18 +236,6 @@ pub enum PluginResponse {
     SolidResult(Result<Handle, String>),
     TableResult(Result<Handle, String>),
     CommandResult(Result<crate::host::CommandOutcome, String>),
-    /// V8 (additive): handle of a created XRecord.
-    XRecordCreateResult(Result<Handle, String>),
-    /// V8 (additive): entries of a read XRecord.
-    XRecordEntries(Result<Vec<crate::host::XRecordEntry>, String>),
-    /// V8 (additive): handle of an updated XRecord.
-    XRecordUpdateResult(Result<Handle, String>),
-    /// V8 (additive): the removed XRecord, with its prior content.
-    XRecordDeleteResult(Result<crate::host::XRecord, String>),
-    /// V8 (additive): XRecord names under a dictionary path.
-    XRecordNames(Result<Vec<String>, String>),
-    /// V9 (additive): outcome of the reference-only designation.
-    SetReferenceOnlyResult(Result<(), String>),
 }
 
 /// Messages sent from the host to the plugin runner.
@@ -307,24 +264,6 @@ impl From<&'static crate::manifest::PluginManifest> for OwnedPluginManifest {
             ribbon_order: m.ribbon_order,
             xdata_apps: m.xdata_apps.iter().map(|s| s.to_string()).collect(),
             command_prefixes: m.command_prefixes.iter().map(|s| s.to_string()).collect(),
-            // The declaration does not live on the static manifest struct (its
-            // layout is frozen ABI, shared by pointer with older cdylibs); the
-            // runner folds the API-v10 trait accessor in after conversion.
-            entity_classes: None,
-        }
-    }
-}
-
-impl From<&'static crate::manifest::EntityClasses> for OwnedEntityClasses {
-    fn from(c: &'static crate::manifest::EntityClasses) -> Self {
-        Self {
-            app_id: c.app_id.to_string(),
-            class_prefix: c.class_prefix.to_string(),
-            labels: c
-                .labels
-                .iter()
-                .map(|(key, label)| (key.to_string(), label.to_string()))
-                .collect(),
         }
     }
 }

@@ -1755,76 +1755,6 @@ enum TrimMode {
     CrossSecond([f64; 2]),
     /// Erase mode: each pick deletes the object; Enter returns to Pick.
     Erase,
-    /// mOde: choosing between Quick and Standard (TRIMEXTENDMODE).
-    ChooseMode,
-}
-
-/// TRIMEXTENDMODE: 1 (Quick) starts TRIM and EXTEND ready to pick, every
-/// object a cutting or boundary edge; 0 (Standard) starts them selecting
-/// those edges first.
-static QUICK_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-
-pub fn quick_mode() -> bool {
-    QUICK_MODE.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-pub fn set_quick_mode(quick: bool) {
-    QUICK_MODE.store(quick, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// The mOde prompt, offering the current mode as the default.
-fn mode_prompt(command: &str) -> String {
-    let current = if quick_mode() { "Quick" } else { "Standard" };
-    crate::tf!("{command}  Enter a trim mode option [Quick/Standard] <{current}>:").into_owned()
-}
-
-fn mode_options() -> Vec<crate::command::CmdOption> {
-    use crate::command::CmdOption;
-    vec![
-        CmdOption::new("Quick", "Q"),
-        CmdOption::new("Standard", "S"),
-    ]
-}
-
-/// The mOde option and its answer, shared by TRIM and EXTEND. Returns the
-/// step's result and whether the edges must be rebuilt, or `None` for input
-/// that is not about the mode.
-fn choose_mode(
-    mode: &mut TrimMode,
-    edge_set: &mut Vec<Handle>,
-    text: &str,
-) -> Option<(CmdResult, bool)> {
-    let word = text.trim().to_uppercase();
-    match (&*mode, word.as_str()) {
-        (TrimMode::Pick, "O" | "MODE") => *mode = TrimMode::ChooseMode,
-        (TrimMode::ChooseMode, "Q" | "QUICK") => {
-            set_quick_mode(true);
-            edge_set.clear();
-            *mode = TrimMode::Pick;
-            return Some((CmdResult::NeedPoint, true));
-        }
-        (TrimMode::ChooseMode, "S" | "STANDARD") => {
-            set_quick_mode(false);
-            edge_set.clear();
-            *mode = TrimMode::SelectEdges;
-        }
-        (TrimMode::ChooseMode, _) => {
-            let message = crate::t!("Invalid option keyword.").into_owned();
-            return Some((CmdResult::ReportError(message), false));
-        }
-        _ => return None,
-    }
-    Some((CmdResult::NeedPoint, false))
-}
-
-/// The first step: picking in Quick mode or when edges were preselected,
-/// selecting edges in Standard mode.
-fn starting_mode(initial_edges: &[Handle]) -> TrimMode {
-    if quick_mode() || !initial_edges.is_empty() {
-        TrimMode::Pick
-    } else {
-        TrimMode::SelectEdges
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -2692,14 +2622,6 @@ pub struct TrimCommand {
 }
 
 impl TrimCommand {
-    fn choose_mode(&mut self, text: &str) -> Option<CmdResult> {
-        let (result, rebuild) = choose_mode(&mut self.mode, &mut self.edge_set, text)?;
-        if rebuild {
-            self.rebuild_geos();
-        }
-        Some(result)
-    }
-
     pub fn new(all_entities: Vec<EntityType>) -> Self {
         Self::with_cutting_edges(all_entities, Vec::new())
     }
@@ -2716,7 +2638,7 @@ impl TrimCommand {
             all_entities,
             entity_index,
             geos: Vec::new(),
-            mode: starting_mode(&initial_edges),
+            mode: TrimMode::Pick,
             edge_set: initial_edges,
             implied_edges: false,
             shift: false,
@@ -2823,7 +2745,6 @@ impl CadCommand for TrimCommand {
             TrimMode::Erase => {
                 t!("TRIM  Erase: click objects to delete [Enter = done]:").into_owned()
             }
-            TrimMode::ChooseMode => mode_prompt("TRIM"),
         }
     }
 
@@ -2843,10 +2764,8 @@ impl CadCommand for TrimCommand {
                     "E",
                 ),
                 CmdOption::new("Erase", "R"),
-                CmdOption::new("mOde", "O"),
                 CmdOption::enter("Done"),
             ],
-            TrimMode::ChooseMode => mode_options(),
             _ => vec![CmdOption::enter("Done")],
         }
     }
@@ -2858,9 +2777,6 @@ impl CadCommand for TrimCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         // Consumed inputs return Some(NeedPoint) — None would be offered to
         // the command a second time by the driver.
-        if let Some(result) = self.choose_mode(text) {
-            return Some(result);
-        }
         match text.trim().to_uppercase().as_str() {
             "T" | "CUTTING" | "B" | "BOUNDARY" => {
                 self.edge_set.clear();
@@ -3409,8 +3325,7 @@ impl CadCommand for TrimCommand {
             TrimMode::Fence(_)
             | TrimMode::CrossFirst
             | TrimMode::CrossSecond(_)
-            | TrimMode::Erase
-            | TrimMode::ChooseMode => CmdResult::NeedPoint,
+            | TrimMode::Erase => CmdResult::NeedPoint,
             TrimMode::Pick => CmdResult::Cancel,
         }
     }
@@ -3442,37 +3357,22 @@ pub struct ExtendCommand {
 }
 
 impl ExtendCommand {
-    fn choose_mode(&mut self, text: &str) -> Option<CmdResult> {
-        let (result, rebuild) = choose_mode(&mut self.mode, &mut self.edge_set, text)?;
-        if rebuild {
-            self.rebuild_geos();
-        }
-        Some(result)
-    }
-
     pub fn new(all_entities: Vec<EntityType>) -> Self {
-        Self::with_boundary_edges(all_entities, Vec::new())
-    }
-
-    /// Objects selected before the command are its boundary edges, as TRIM
-    /// takes them as cutting edges.
-    pub fn with_boundary_edges(all_entities: Vec<EntityType>, initial_edges: Vec<Handle>) -> Self {
         let all_entities: Vec<EntityType> = all_entities
             .iter()
             .map(entity_with_lwpolyline_world_xy)
             .collect();
         let entity_index = ModifyEntityIndex::build(&all_entities);
-        let mut cmd = Self {
+        let geos = build_geos(&all_entities);
+        Self {
             all_entities,
             entity_index,
-            geos: Vec::new(),
-            mode: starting_mode(&initial_edges),
-            edge_set: initial_edges,
+            geos,
+            mode: TrimMode::Pick,
+            edge_set: Vec::new(),
             implied_edges: false,
             shift: false,
-        };
-        cmd.rebuild_geos();
-        cmd
+        }
     }
 
     fn rebuild_geos(&mut self) {
@@ -3536,7 +3436,6 @@ impl CadCommand for ExtendCommand {
                 crate::tf!("EXTEND{edge}  Crossing: opposite corner:").into_owned()
             }
             TrimMode::Erase => t!("EXTEND  [Enter = done]:").into_owned(),
-            TrimMode::ChooseMode => mode_prompt("EXTEND"),
         }
     }
 
@@ -3555,10 +3454,8 @@ impl CadCommand for ExtendCommand {
                     },
                     "E",
                 ),
-                CmdOption::new("mOde", "O"),
                 CmdOption::enter("Done"),
             ],
-            TrimMode::ChooseMode => mode_options(),
             _ => vec![CmdOption::enter("Done")],
         }
     }
@@ -3568,9 +3465,6 @@ impl CadCommand for ExtendCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        if let Some(result) = self.choose_mode(text) {
-            return Some(result);
-        }
         match text.trim().to_uppercase().as_str() {
             "B" | "BOUNDARY" | "T" | "CUTTING" => {
                 self.edge_set.clear();
@@ -3887,8 +3781,7 @@ impl CadCommand for ExtendCommand {
             TrimMode::Fence(_)
             | TrimMode::CrossFirst
             | TrimMode::CrossSecond(_)
-            | TrimMode::Erase
-            | TrimMode::ChooseMode => CmdResult::NeedPoint,
+            | TrimMode::Erase => CmdResult::NeedPoint,
             TrimMode::Pick => CmdResult::Cancel,
         }
     }
@@ -4814,7 +4707,7 @@ mod tests {
         );
 
         // 1. External tangency: Test across multiple angles and slight epsilons
-        for angle in [0.0f64, 0.5, 1.0, 1.57, 2.5, std::f64::consts::PI, 4.0, 5.0] {
+        for angle in [0.0f64, 0.5, 1.0, 1.57, 2.5, 3.14, 4.0, 5.0] {
             for eps in [-1e-8, 0.0, 1e-8] {
                 let dist = 20.0 + eps;
                 let dx = dist * angle.cos();
@@ -5029,403 +4922,6 @@ mod tests {
                 "arc trim should succeed with off-axis crossing arc"
             );
         }
-    }
-
-    #[test]
-    fn test_trim_line_tangent_to_arc() {
-        use codec::entities::{Arc as ArcEnt, Line as LineEnt};
-        let mut l1 = LineEnt::new();
-        l1.common.handle = Handle::new(1);
-        l1.start = Vector3::new(-10.0, 0.0, 0.0);
-        l1.end = Vector3::new(10.0, 0.0, 0.0);
-
-        let mut a = ArcEnt::new();
-        a.common.handle = Handle::new(2);
-        a.center = Vector3::new(0.0, 5.0, 0.0);
-        a.radius = 5.0;
-        a.start_angle = -std::f64::consts::FRAC_PI_2;
-        a.end_angle = std::f64::consts::PI;
-
-        let all = vec![EntityType::Line(l1.clone()), EntityType::Arc(a.clone())];
-        let geos = build_geos(&all);
-        let curve_line = entity_curve_xy(&EntityType::Line(l1.clone())).unwrap();
-        let ts_line = cut_params(&curve_line, Handle::new(1), &geos);
-        assert!(
-            !ts_line.is_empty(),
-            "line must have cut point where tangent arc touches it: ts={:?}",
-            ts_line
-        );
-
-        let curve_arc = entity_curve_xy(&EntityType::Arc(a.clone())).unwrap();
-        let ts_arc = cut_params(&curve_arc, Handle::new(2), &geos);
-        println!("ts_arc: {:?}", ts_arc);
-    }
-
-    #[test]
-    fn test_trim_arc_tangent_to_two_lines() {
-        use crate::command::{TangentObject, WorkingPlane};
-        use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
-        use codec::entities::{Arc as CadArc, Line as LineEnt};
-
-        let mut l1 = LineEnt::new();
-        l1.common.handle = Handle::new(1);
-        l1.start = Vector3::new(-10.0, 0.0, 0.0);
-        l1.end = Vector3::new(10.0, 0.0, 0.0);
-
-        let mut l2 = LineEnt::new();
-        l2.common.handle = Handle::new(2);
-        l2.start = Vector3::new(0.0, -10.0, 0.0);
-        l2.end = Vector3::new(0.0, 10.0, 0.0);
-
-        let t1 = TangentObject::Line {
-            p1: DVec3::new(-10.0, 0.0, 0.0),
-            p2: DVec3::new(10.0, 0.0, 0.0),
-        };
-        let t2 = TangentObject::Line {
-            p1: DVec3::new(0.0, -10.0, 0.0),
-            p2: DVec3::new(0.0, 10.0, 0.0),
-        };
-
-        // Middle point: (1 - sqrt(0.5), 1 - sqrt(0.5)) -> radius ~ 1
-        let mid = DVec3::new(1.0 - (0.5_f64).sqrt(), 1.0 - (0.5_f64).sqrt(), 0.0);
-        let sol = solve_arc_3_inputs(
-            ArcPick::Tangent {
-                target: t1,
-                hit: DVec3::new(2.0, 0.0, 0.0),
-            },
-            ArcPick::Point(mid),
-            ArcPick::Tangent {
-                target: t2,
-                hit: DVec3::new(0.0, 2.0, 0.0),
-            },
-            WorkingPlane::default(),
-        );
-
-        let (center, radius, sa, ea) = sol.expect("must solve arc tangent to two lines");
-        let mut arc = CadArc::new();
-        arc.common.handle = Handle::new(3);
-        arc.center = Vector3::new(center.x, center.y, center.z);
-        arc.radius = radius;
-        arc.start_angle = sa;
-        arc.end_angle = ea;
-
-        let all = vec![
-            EntityType::Line(l1.clone()),
-            EntityType::Line(l2.clone()),
-            EntityType::Arc(arc.clone()),
-        ];
-        let geos = build_geos(&all);
-
-        let curve_l1 = entity_curve_xy(&EntityType::Line(l1.clone())).unwrap();
-        let ts_l1 = cut_params(&curve_l1, Handle::new(1), &geos);
-        println!("ts_l1: {:?}", ts_l1);
-
-        let curve_l2 = entity_curve_xy(&EntityType::Line(l2.clone())).unwrap();
-        let ts_l2 = cut_params(&curve_l2, Handle::new(2), &geos);
-        println!("ts_l2: {:?}", ts_l2);
-
-        let curve_arc = entity_curve_xy(&EntityType::Arc(arc.clone())).unwrap();
-        let ts_arc = cut_params(&curve_arc, Handle::new(3), &geos);
-        println!("ts_arc: {:?}", ts_arc);
-
-        assert!(!ts_l1.is_empty(), "Line 1 must be cut: ts_l1={:?}", ts_l1);
-        assert!(!ts_l2.is_empty(), "Line 2 must be cut: ts_l2={:?}", ts_l2);
-
-        // Test trimming line 1 arm between (1, 0) and (10, 0)
-        let trim_l1 = pick_trim_at(&all, &geos, Handle::new(1), 5.0, 0.0);
-        println!("trim_l1: {:?}", trim_l1);
-        assert!(trim_l1.is_some(), "trimming line 1 arm must succeed");
-
-        // Test trimming line 2 arm between (0, 1) and (0, 10)
-        let trim_l2 = pick_trim_at(&all, &geos, Handle::new(2), 0.0, 5.0);
-        println!("trim_l2: {:?}", trim_l2);
-        assert!(trim_l2.is_some(), "trimming line 2 arm must succeed");
-
-        // Test trimming the arc
-        let trim_arc = pick_trim_at(&all, &geos, Handle::new(3), mid.x, mid.y);
-        println!("trim_arc: {:?}", trim_arc);
-    }
-
-    #[test]
-    fn test_trim_arc_tangent_angled_lines() {
-        use crate::command::{TangentObject, WorkingPlane};
-        use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
-        use codec::entities::{Arc as CadArc, Line as LineEnt};
-
-        // Two lines meeting at (0, 0): one along (cos(20 deg), sin(20 deg)), other along (cos(80 deg), sin(80 deg))
-        let a1 = 20.0_f64.to_radians();
-        let a2 = 80.0_f64.to_radians();
-        let dir1 = DVec3::new(a1.cos(), a1.sin(), 0.0);
-        let dir2 = DVec3::new(a2.cos(), a2.sin(), 0.0);
-
-        let mut l1 = LineEnt::new();
-        l1.common.handle = Handle::new(1);
-        l1.start = Vector3::new(-10.0 * dir1.x, -10.0 * dir1.y, 0.0);
-        l1.end = Vector3::new(50.0 * dir1.x, 50.0 * dir1.y, 0.0);
-
-        let mut l2 = LineEnt::new();
-        l2.common.handle = Handle::new(2);
-        l2.start = Vector3::new(-10.0 * dir2.x, -10.0 * dir2.y, 0.0);
-        l2.end = Vector3::new(50.0 * dir2.x, 50.0 * dir2.y, 0.0);
-
-        let t1 = TangentObject::Line {
-            p1: DVec3::new(l1.start.x, l1.start.y, 0.0),
-            p2: DVec3::new(l1.end.x, l1.end.y, 0.0),
-        };
-        let t2 = TangentObject::Line {
-            p1: DVec3::new(l2.start.x, l2.start.y, 0.0),
-            p2: DVec3::new(l2.end.x, l2.end.y, 0.0),
-        };
-
-        // Midpoint between points at distance 20 on the bisector
-        let bisector_angle = (a1 + a2) * 0.5;
-        let mid = DVec3::new(
-            15.0 * bisector_angle.cos(),
-            15.0 * bisector_angle.sin(),
-            0.0,
-        );
-
-        let sol = solve_arc_3_inputs(
-            ArcPick::Tangent {
-                target: t1,
-                hit: DVec3::new(20.0 * dir1.x, 20.0 * dir1.y, 0.0),
-            },
-            ArcPick::Point(mid),
-            ArcPick::Tangent {
-                target: t2,
-                hit: DVec3::new(20.0 * dir2.x, 20.0 * dir2.y, 0.0),
-            },
-            WorkingPlane::default(),
-        );
-
-        let (center, radius, sa, ea) = sol.expect("must solve arc tangent to two angled lines");
-        let mut arc = CadArc::new();
-        arc.common.handle = Handle::new(3);
-        arc.center = Vector3::new(center.x, center.y, center.z);
-        arc.radius = radius;
-        arc.start_angle = sa;
-        arc.end_angle = ea;
-
-        let all = vec![
-            EntityType::Line(l1.clone()),
-            EntityType::Line(l2.clone()),
-            EntityType::Arc(arc.clone()),
-        ];
-        let geos = build_geos(&all);
-
-        let curve_l1 = entity_curve_xy(&EntityType::Line(l1.clone())).unwrap();
-        let ts_l1 = cut_params(&curve_l1, Handle::new(1), &geos);
-        println!("angled ts_l1: {:?}", ts_l1);
-
-        let curve_l2 = entity_curve_xy(&EntityType::Line(l2.clone())).unwrap();
-        let ts_l2 = cut_params(&curve_l2, Handle::new(2), &geos);
-        println!("angled ts_l2: {:?}", ts_l2);
-
-        // We expect l1 to have at least 2 cuts: the intersection with l2 at (0,0) and the tangent point with arc!
-        assert!(
-            ts_l1.len() >= 2,
-            "Line 1 must have intersection and tangent cut: got {:?}",
-            ts_l1
-        );
-        assert!(
-            ts_l2.len() >= 2,
-            "Line 2 must have intersection and tangent cut: got {:?}",
-            ts_l2
-        );
-
-        // Trimming l1 arm past the tangent point
-        let click_l1 = 40.0 * dir1;
-        let trim_l1 = pick_trim_at(&all, &geos, Handle::new(1), click_l1.x, click_l1.y);
-        println!("angled trim_l1: {:?}", trim_l1);
-        assert!(trim_l1.is_some(), "trimming line 1 must succeed");
-    }
-
-    #[test]
-    fn test_kernel_intersect_tangency() {
-        use std::f64::consts::FRAC_PI_2;
-        let line = Curve::Line(KernelLine {
-            start: [-10.0, 0.0],
-            end: [10.0, 0.0],
-        });
-
-        // Case 1: Exact tangency at interior of arc
-        let arc_exact = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2 - 0.2,
-            end_angle: -FRAC_PI_2 + 0.2,
-        });
-        let hits_exact = kernel_intersect(&line, &arc_exact, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_exact: {:?}", hits_exact);
-
-        // Case 2: Distance slightly greater than R by 1e-12 (within tolerance 1e-7)
-        let arc_eps = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0 + 1e-12],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2 - 0.2,
-            end_angle: -FRAC_PI_2 + 0.2,
-        });
-        let hits_eps = kernel_intersect(&line, &arc_eps, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_eps: {:?}", hits_eps);
-
-        // Case 3: Distance slightly greater than R by 1e-9
-        let arc_eps9 = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0 + 1e-9],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2 - 0.2,
-            end_angle: -FRAC_PI_2 + 0.2,
-        });
-        let hits_eps9 = kernel_intersect(&line, &arc_eps9, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_eps9: {:?}", hits_eps9);
-
-        // Case 4: Tangency at arc start endpoint
-        let arc_start = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2,
-            end_angle: 0.0,
-        });
-        let hits_start = kernel_intersect(&line, &arc_start, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_start (-PI/2): {:?}", hits_start);
-
-        // Case 5: Tangency at arc start endpoint with normalized angle 3*PI/2
-        let arc_norm = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: 3.0 * FRAC_PI_2,
-            end_angle: 0.0, // wait! In CCW, from 3*PI/2 to 0 is span PI/2, or 2*PI?
-        });
-        let hits_norm = kernel_intersect(&line, &arc_norm, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_norm (3*PI/2): {:?}", hits_norm);
-
-        // Case 6: Tangency at arc end endpoint
-        let arc_end = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: std::f64::consts::PI,
-            end_angle: -FRAC_PI_2,
-        });
-        let hits_end = kernel_intersect(&line, &arc_end, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_end (-PI/2): {:?}", hits_end);
-
-        // Case 7: Large coordinates (e.g. 5000, 5005)
-        let line_large = Curve::Line(KernelLine {
-            start: [4990.0, 5000.0],
-            end: [5010.0, 5000.0],
-        });
-        let arc_large = Curve::Arc(KernelArc {
-            centre: [5000.0, 5005.0],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2,
-            end_angle: 0.0,
-        });
-        let hits_large =
-            kernel_intersect(&line_large, &arc_large, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_large: {:?}", hits_large);
-
-        // Test with cut_params:
-        let geos_large = vec![Geo::Arc {
-            handle: Handle::new(2),
-            cx: 5000.0,
-            cy: 5005.0,
-            r: 5.0,
-            a0: -FRAC_PI_2,
-            a1: 0.0,
-        }];
-        let cuts_large = cut_params(&line_large, Handle::new(1), &geos_large);
-        let _ = cuts_large;
-    }
-
-    #[test]
-    fn test_arc_tangent_line_precision_sweep() {
-        use crate::command::{TangentObject, WorkingPlane};
-        use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
-        use codec::entities::{Arc as CadArc, Line as LineEnt};
-
-        let mut max_dist = 0.0_f64;
-        let mut failed_cuts = 0;
-
-        for i in 1..36 {
-            let angle_deg = i as f64 * 5.0; // 5 to 175 degrees
-            let a2 = angle_deg.to_radians();
-
-            let dir1 = DVec3::new(1.0, 0.0, 0.0);
-            let dir2 = DVec3::new(a2.cos(), a2.sin(), 0.0);
-
-            let mut l1 = LineEnt::new();
-            l1.common.handle = Handle::new(1);
-            l1.start = Vector3::new(-50.0, 0.0, 0.0);
-            l1.end = Vector3::new(150.0, 0.0, 0.0);
-
-            let mut l2 = LineEnt::new();
-            l2.common.handle = Handle::new(2);
-            l2.start = Vector3::new(-50.0 * dir2.x, -50.0 * dir2.y, 0.0);
-            l2.end = Vector3::new(150.0 * dir2.x, 150.0 * dir2.y, 0.0);
-
-            let t1 = TangentObject::Line {
-                p1: DVec3::new(l1.start.x, l1.start.y, 0.0),
-                p2: DVec3::new(l1.end.x, l1.end.y, 0.0),
-            };
-            let t2 = TangentObject::Line {
-                p1: DVec3::new(l2.start.x, l2.start.y, 0.0),
-                p2: DVec3::new(l2.end.x, l2.end.y, 0.0),
-            };
-
-            let bisector = (dir1 + dir2).normalize();
-            let mid = bisector * 30.0;
-
-            let sol = solve_arc_3_inputs(
-                ArcPick::Tangent {
-                    target: t1,
-                    hit: DVec3::new(50.0, 0.0, 0.0),
-                },
-                ArcPick::Point(mid),
-                ArcPick::Tangent {
-                    target: t2,
-                    hit: dir2 * 50.0,
-                },
-                WorkingPlane::default(),
-            );
-
-            if let Some((center, radius, sa, ea)) = sol {
-                let mut arc = CadArc::new();
-                arc.common.handle = Handle::new(3);
-                arc.center = Vector3::new(center.x, center.y, center.z);
-                arc.radius = radius;
-                arc.start_angle = sa;
-                arc.end_angle = ea;
-
-                let all = vec![
-                    EntityType::Line(l1.clone()),
-                    EntityType::Line(l2.clone()),
-                    EntityType::Arc(arc.clone()),
-                ];
-                let geos = build_geos(&all);
-
-                let curve_l1 = entity_curve_xy(&EntityType::Line(l1.clone())).unwrap();
-                let ts_l1 = cut_params(&curve_l1, Handle::new(1), &geos);
-
-                let curve_l2 = entity_curve_xy(&EntityType::Line(l2.clone())).unwrap();
-                let ts_l2 = cut_params(&curve_l2, Handle::new(2), &geos);
-
-                if ts_l1.len() < 2 || ts_l2.len() < 2 {
-                    failed_cuts += 1;
-                    println!(
-                        "FAILED at angle {angle_deg} deg: ts_l1={:?}, ts_l2={:?}",
-                        ts_l1, ts_l2
-                    );
-                }
-
-                // Check distance of arc endpoints to line
-                let ep1 = [center.x + radius * sa.cos(), center.y + radius * sa.sin()];
-                let d1 = (ep1[1] - 0.0).abs(); // distance to l1 (y=0)
-                if d1 > max_dist {
-                    max_dist = d1;
-                }
-            }
-        }
-        println!("Sweep results: failed_cuts={failed_cuts}, max_dist={max_dist:e}");
-        assert_eq!(failed_cuts, 0, "No cuts should fail across angle sweep");
     }
 }
 

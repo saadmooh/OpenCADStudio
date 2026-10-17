@@ -62,7 +62,6 @@ static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/layulk.svg");
 // All are black-on-transparent; recolour them at the call site with [`tinted`].
 pub static CHECK: &[u8] = include_bytes!("../../assets/icons/ui/check.svg");
 pub static CLOSE: &[u8] = include_bytes!("../../assets/icons/ui/close.svg");
-pub static EYEDROPPER: &[u8] = include_bytes!("../../assets/icons/ui/eyedropper.svg");
 pub static PLUS: &[u8] = include_bytes!("../../assets/icons/ui/plus.svg");
 pub static REFRESH: &[u8] = include_bytes!("../../assets/icons/ui/refresh.svg");
 pub static SWAP: &[u8] = include_bytes!("../../assets/icons/ui/swap.svg");
@@ -73,17 +72,10 @@ pub static COPY: &[u8] = include_bytes!("../../assets/icons/ui/copy.svg");
 pub static MENU: &[u8] = include_bytes!("../../assets/icons/ui/menu.svg");
 pub static MOVE: &[u8] = include_bytes!("../../assets/icons/ui/move.svg");
 pub static RESIZE: &[u8] = include_bytes!("../../assets/icons/ui/resize.svg");
-/// `RESIZE` mirrored for a bottom-left corner grip.
-pub static RESIZE_LEFT: &[u8] = include_bytes!("../../assets/icons/ui/resize_left.svg");
 pub static PIN: &[u8] = include_bytes!("../../assets/icons/ui/pin.svg");
-/// `PIN` tilted 30°: the pin while auto-hide is on.
-pub static PIN_ACTIVE: &[u8] = include_bytes!("../../assets/icons/ui/pin_active.svg");
 pub static SPLIT_V: &[u8] = include_bytes!("../../assets/icons/ui/split_v.svg");
 pub static SPLIT_H: &[u8] = include_bytes!("../../assets/icons/ui/split_h.svg");
 pub static GRID: &[u8] = include_bytes!("../../assets/icons/ui/grid.svg");
-pub static LIST: &[u8] = include_bytes!("../../assets/icons/ui/list.svg");
-pub static SEARCH: &[u8] = include_bytes!("../../assets/icons/ui/search.svg");
-pub static PREVIEW: &[u8] = include_bytes!("../../assets/icons/ui/preview.svg");
 pub static SNAP: &[u8] = include_bytes!("../../assets/icons/ui/snap.svg");
 pub static DOC_NEW: &[u8] = include_bytes!("../../assets/icons/ui/doc_new.svg");
 pub static DOC: &[u8] = include_bytes!("../../assets/icons/ui/doc.svg");
@@ -517,16 +509,13 @@ pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'
         .into()
 }
 
-/// Render disabled chrome with the active Iced theme's text color, faded
-/// like disabled text. The fade goes through the widget's opacity: an SVG
-/// tint only replaces RGB, so alpha on the style colour would be ignored.
+/// Render disabled chrome with the active Iced theme's text color.
 pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     svg(themed_handle(bytes))
         .width(size)
         .height(size)
-        .opacity(0.42_f32)
         .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text),
+            color: Some(theme.palette().background.base.text.scale_alpha(0.42)),
         })
         .into()
 }

@@ -1,4 +1,3 @@
-use crate::io::plot_style::PlotStyleTableExt as _;
 use super::{ArrowKey, Message, OpenCADStudio, TextEntryMode};
 use crate::command::CadCommand;
 use crate::scene::VIEWCUBE_DRAW_PX;
@@ -24,8 +23,6 @@ fn is_modal_blocked_key_msg(msg: &Message) -> bool {
             | Message::ArrowKeyPressed { .. }
             | Message::CommandLineArrowProbe { .. }
             | Message::CommandLineArrowResolved { .. }
-            | Message::CommandLineSpaceProbe
-            | Message::CommandLineSpaceResolved
             | Message::DynTabNext
             | Message::DynTabPrev
             | Message::MTextCaretMove(_)
@@ -51,9 +48,7 @@ fn is_modal_blocked_key_msg(msg: &Message) -> bool {
 
 fn perf_message_label(msg: &Message) -> &'static str {
     match msg {
-        Message::ViewportLeftPressAt(_) | Message::ViewportLeftPress | Message::PanePress(_) => {
-            "pointer-down"
-        }
+        Message::ViewportLeftPress | Message::PanePress(_) => "pointer-down",
         Message::ViewportLeftRelease | Message::PaneRelease(_) => "pointer-up",
         Message::ViewportMove(_) | Message::PaneMove(_, _) => "pointer-move",
         Message::CommandFinalize => "command-finalize",
@@ -96,21 +91,14 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
     (insertion != from).then_some(insertion)
 }
 
-#[cfg(test)]
-mod block_ops_tests;
 mod blocks_palette;
 mod command;
 mod context_menu;
 mod dialog;
 mod dynamic;
 mod file;
-mod graphic_attributes;
-mod keytips;
 pub(in crate::app) use file::background_task;
-#[cfg(not(target_arch = "wasm32"))]
-pub(in crate::app) use file::native_paths_match;
 mod page_setup_import;
-mod qselect;
 mod style;
 pub(in crate::app) mod util;
 mod viewport;
@@ -219,7 +207,6 @@ impl OpenCADStudio {
         match self.active_modal {
             // Dismissing these via ✕ is the cancel/decline path.
             Some(Unsaved) => self.pending_close = None,
-            Some(BlockEditChanges) => self.cancel_block_edit_close(),
             Some(AssocPrompt) => self.mark_assoc_prompted(),
             // Cancel: leave the layer (and its objects) untouched.
             Some(LayerDeleteWarning) => self.layer_delete_pending = None,
@@ -233,34 +220,14 @@ impl OpenCADStudio {
             }
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
-            Some(AttMan) => self.attman = None,
-            Some(BlockEditPicker) => self.block_edit_picker = None,
-            Some(BlockSaveAs) => self.block_save_as = None,
-            Some(BlockVisibility) => self.block_visibility = None,
-            Some(BlockLookup) => self.block_lookup = None,
             Some(PdfAttach) => self.pdf_attach = None,
             Some(UnderlayLayers) => self.underlay_layers = None,
             Some(PdfImportSettings) => self.pdf_import_settings = None,
-            // OK or Cancel: TXT2MTXT asks for its selection again.
-            Some(Txt2MtxtSettings) => {
-                self.txt2mtxt_dialog = None;
-                if let Some(prompt) = self.tabs[self.active_tab]
-                    .active_cmd
-                    .as_ref()
-                    .map(|command| command.prompt())
-                {
-                    self.command_line.push_info(&prompt);
-                }
-            }
             Some(PdfImportFile) => self.pdf_import_file = None,
-            Some(ImportFile) => self.import_dialogs.file = None,
-            Some(DgnImport) => self.import_dialogs.dgn = None,
-            Some(TdsImport) => self.import_dialogs.tds = None,
             Some(XrefAttach) => self.xref_attach = None,
             Some(WriteBlock) => self.wblock = None,
             Some(Hyperlink) => {
                 self.hyperlink_editor_handles.clear();
-                self.hyperlink_editor_block = None;
                 self.hyperlink_editor_url.clear();
                 self.hyperlink_editor_description.clear();
                 self.hyperlink_editor_mixed = false;
@@ -332,13 +299,7 @@ impl OpenCADStudio {
         }
         self.last_plugin_selection = Some(key);
         let handles = self.tabs[i].scene.selected_handles_in_order();
-        crate::plugin::v4_support::publish_selection_changed_v4(tab_id, handles.clone());
-        // Same guarded boundary, second surface (API v9): the plain
-        // `SelectionChanged` reaches every loaded native plugin through
-        // `BuiltinPlugin::on_notification`, without a shared-view
-        // subscription.
-        crate::plugin::v4_support::publish_selection_changed(handles.clone());
-        self.control_record_selection_event(&handles);
+        crate::plugin::v4_support::publish_selection_changed_v4(tab_id, handles);
     }
 
     /// Refresh the shared V4 document after built-in geometry edits. Plugin
@@ -357,33 +318,6 @@ impl OpenCADStudio {
         self.last_plugin_document = Some(key);
         crate::plugin::v4_support::publish_drawing_changed(tab.id, tab.scene.geometry_epoch);
         crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document);
-        // Same guarded boundary, second surface (API v9): the plain
-        // `DocumentChanged` carries the settled geometry epoch to every
-        // loaded native plugin through `BuiltinPlugin::on_notification`.
-        crate::plugin::v4_support::publish_document_changed(tab.scene.geometry_epoch);
-    }
-
-    /// Announce that a whole document became resident in the active tab —
-    /// opened from file, created from a template, or loaded by a system open
-    /// (API v9). Each tab carries its own pending flag, set only when its
-    /// content is wholesale replaced, so neither an edit nor a tab switch can
-    /// fire it twice and a reload fires it exactly once. Part of the same
-    /// post-message boundary as the selection and document dispatches: runs
-    /// after the mutation settles and pending history scopes closed, never
-    /// inside history replay or interactive picking.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn notify_plugins_document_opened(&mut self) {
-        if self.active_tab >= self.tabs.len() {
-            return;
-        }
-        let i = self.active_tab;
-        if self.tabs[i].is_start {
-            return;
-        }
-        if !std::mem::take(&mut self.tabs[i].document_opened_pending) {
-            return;
-        }
-        crate::plugin::v4_support::publish_document_opened(self.tabs[i].id);
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
@@ -391,62 +325,12 @@ impl OpenCADStudio {
         // creating or closing a tab), the contextual ribbon tab follows that
         // document's selection.
         let before = self.tabs.get(self.active_tab).map(|tab| tab.id);
-        // Pickers offer the catalog linetypes the drawing lacks; the one
-        // picked is loaded before it is assigned.
-        if let Message::LayerLinetypeSet(name)
-        | Message::LayerStateEditorLayerLinetype(_, name)
-        | Message::RibbonLinetypeChanged(name)
-        | Message::PropLinetypeChanged(name)
-        | Message::AttrEditorLinetype(name) = &msg
-        {
-            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                if crate::io::linetypes::ensure_catalog_linetype(&mut tab.scene.document, name) {
-                    tab.scene.bump_geometry();
-                }
-            }
-        }
         let task = self.update_message(msg);
-        self.restore_dynamic_ucs_after_command();
-        self.sync_block_visibility_display();
         if self.tabs.get(self.active_tab).map(|tab| tab.id) != before {
             self.sync_underlay_tab();
         }
         self.sync_frame_dropdown();
-        let block_editing = self
-            .tabs
-            .get(self.active_tab)
-            .is_some_and(|tab| tab.active_block_edit.is_some());
-        let testing = self
-            .tabs
-            .get(self.active_tab)
-            .is_some_and(|tab| tab.block_test.is_some());
-        if testing {
-            self.ribbon.set_block_editing(false);
-            self.ribbon.set_block_testing(true);
-        } else {
-            self.ribbon.set_block_testing(false);
-            self.ribbon.set_block_editing(block_editing);
-        }
         task
-    }
-
-    /// A dynamic UCS lasts for the command that set it: once that tab's
-    /// command has ended, the UCS it replaced comes back.
-    fn restore_dynamic_ucs_after_command(&mut self) {
-        let Some((tab_id, _)) = self.dynamic_ucs_restore else {
-            return;
-        };
-        let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
-            self.dynamic_ucs_restore = None;
-            return;
-        };
-        if self.tabs[i].active_cmd.is_some() {
-            return;
-        }
-        if let Some((_, saved)) = self.dynamic_ucs_restore.take() {
-            self.tabs[i].active_ucs = saved;
-            self.tabs[i].sync_ucs_to_scene();
-        }
     }
 
     /// The Frames list on the ribbon shows the active drawing's frame state
@@ -463,12 +347,6 @@ impl OpenCADStudio {
             _ => "FRAMES3",
         };
         self.ribbon.set_dropdown_current("FRAMES_DROPDOWN", current);
-        let uosnap = match crate::scene::model::pdf_vector::uosnap() {
-            0 => "UOSNAP0",
-            1 => "UOSNAP1",
-            _ => "UOSNAP2",
-        };
-        self.ribbon.set_dropdown_current("UOSNAP_DROPDOWN", uosnap);
         let attmode = match tab.scene.document.header.attribute_visibility {
             0 => "ATTMODE0",
             2 => "ATTMODE2",
@@ -492,41 +370,6 @@ impl OpenCADStudio {
             let tab = &self.tabs[self.active_tab];
             (started, tab.id, tab.scene.geometry_epoch)
         });
-        // The Select Color panel can open on top of another dialog, so it
-        // takes the keyboard first: Esc cancels, Enter confirms, the arrows
-        // walk the index palette, and every other keystroke is swallowed.
-        if self.color_picker.is_some() {
-            use crate::ui::color_select::ColorPickerMsg;
-            match &msg {
-                Message::CommandEscape => {
-                    return self.update(Message::ColorPicker(ColorPickerMsg::Cancel));
-                }
-                Message::CommandFinalize => {
-                    return self.update(Message::ColorPicker(ColorPickerMsg::Ok));
-                }
-                Message::ShortcutPressed(key) => match key.rsplit('+').next() {
-                    Some("ESCAPE") => {
-                        return self.update(Message::ColorPicker(ColorPickerMsg::Cancel));
-                    }
-                    Some("ENTER" | "RETURN") => {
-                        return self.update(Message::ColorPicker(ColorPickerMsg::Ok));
-                    }
-                    Some("TAB") => {
-                        return crate::ui::color_select::picker::focus_step(
-                            !key.contains("SHIFT+"),
-                        );
-                    }
-                    _ => {}
-                },
-                Message::ArrowKeyPressed { direction, .. } => {
-                    return self.update(Message::ColorPicker(ColorPickerMsg::Arrow(*direction)));
-                }
-                _ => {}
-            }
-            if is_modal_blocked_key_msg(&msg) {
-                return Task::none();
-            }
-        }
         // A modal dialog must capture the keyboard the same way it already
         // captures the mouse. Otherwise keystrokes from the global key
         // subscription leak past the modal into the command line and fire as
@@ -579,18 +422,6 @@ impl OpenCADStudio {
                     }
                 }
             }
-            if self.active_modal == Some(super::ModalKind::BlockEditPicker)
-                && (matches!(msg, Message::CommandFinalize)
-                    || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN")))
-            {
-                return self.apply_bedit_dialog();
-            }
-            if self.active_modal == Some(super::ModalKind::BlockSaveAs)
-                && (matches!(msg, Message::CommandFinalize)
-                    || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN")))
-            {
-                return self.apply_block_save_as_dialog();
-            }
             if self.active_modal == Some(super::ModalKind::WriteBlock) {
                 if matches!(msg, Message::CommandFinalize)
                     || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ENTER") || key.rsplit('+').next() == Some("RETURN"))
@@ -637,19 +468,7 @@ impl OpenCADStudio {
             }
         }
         self.refresh_gpu_status();
-        if self.graphic_attributes.tracks_selection() {
-            let selected = self.tabs[self.active_tab].scene.selected_handles_in_order();
-            self.graphic_attributes.retain_selection(&selected);
-        }
         self.show_next_startup_modal();
-        // A Restore-all batch finished settling on this message: now that
-        // the last restored open has inserted its tab, focus the tab the
-        // remembered session had active (web session memory).
-        #[cfg(target_arch = "wasm32")]
-        if self.web_session_focus_pending {
-            self.web_session_focus_pending = false;
-            return self.select_remembered_session_tab();
-        }
         self.sync_open_command_history();
         // Close the document-level first-touch transaction started by
         // push_undo_snapshot at this message boundary.
@@ -662,7 +481,6 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
-            .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
@@ -670,17 +488,6 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.options())
-            .or_else(|| {
-                self.graphic_attributes
-                    .pending_fill_close
-                    .as_ref()
-                    .map(|_| {
-                        vec![
-                            crate::command::CmdOption::new("Yes", "Y"),
-                            crate::command::CmdOption::new("No", "N"),
-                        ]
-                    })
-            })
             .unwrap_or_default();
         self.command_line.set_step_options(opts);
         // Persist UI preferences whenever a toggle changes them (issue #68).
@@ -700,16 +507,6 @@ impl OpenCADStudio {
         self.notify_plugins_selection_changed();
         #[cfg(not(target_arch = "wasm32"))]
         self.notify_plugins_document_changed();
-        // A message may also have installed a whole document into a tab (file
-        // open, template new); announce it on the same boundary (API v9).
-        #[cfg(not(target_arch = "wasm32"))]
-        self.notify_plugins_document_opened();
-        // The `N found, M total` count belongs to the command that gathered
-        // it; the next command, even one boxed at the same address, starts
-        // from nothing.
-        if self.tabs[self.active_tab].active_cmd.is_none() {
-            self.selection_report = None;
-        }
         // OTRACK acquires tracking points only while a command or grip drag is
         // running; drop them once neither is active so the temporary tracking
         // points / vectors disappear when the command ends (issue #64). A grip
@@ -745,11 +542,7 @@ impl OpenCADStudio {
             }
         }
         #[cfg(target_arch = "wasm32")]
-        crate::sys::set_unsaved_changes_warning(
-            self.tabs
-                .iter()
-                .any(|tab| tab.dirty && tab.block_test.is_none()),
-        );
+        crate::sys::set_unsaved_changes_warning(self.tabs.iter().any(|tab| tab.dirty));
         if self.tabs[i].active_cmd.is_none() {
             self.block_palette.placing = None;
         }
@@ -773,7 +566,6 @@ impl OpenCADStudio {
         match msg {
             Message::SpaceMouseWake => self.on_spacemouse_wake(),
             Message::TrackpadPinch(magnification) => self.on_pinch_zoom(magnification),
-            Message::Touch(event) => self.on_touch(event),
             Message::SpaceMouseFrame(time) => {
                 self.spacemouse
                     .frame(time.saturating_duration_since(self.start).as_secs_f64() * 1000.);
@@ -782,14 +574,6 @@ impl OpenCADStudio {
             Message::SpaceMouseFocus(id, focused) => {
                 if Some(id) == self.main_window {
                     self.spacemouse_focused = focused;
-                }
-                // Key tips close when the window loses the focus, and an Alt
-                // held while it left (Alt+Tab) no longer counts as a lone tap.
-                if !focused {
-                    crate::ui::ribbon::keytip_pointer_pressed();
-                }
-                if !focused && self.ribbon.keytips_active() {
-                    return self.hide_keytips();
                 }
                 Task::none()
             }
@@ -857,96 +641,11 @@ impl OpenCADStudio {
             }
             #[cfg(target_arch = "wasm32")]
             Message::PollWebControl => {
-                let control = if let Some(request) = super::control::web_request() {
+                if let Some(request) = super::control::web_request() {
                     self.update(Message::ControlRequest(request))
                 } else {
                     Task::none()
-                };
-                // Dragged-in drawings ride the same poll (#344): start one
-                // only while the open slot is free — the same guard as a
-                // desktop drop — and leave the rest queued, so a multi-file
-                // drop opens sequentially without its own subscription.
-                let dropped = if self.opening.is_none()
-                    && self.active_modal != Some(super::ModalKind::Recovery)
-                {
-                    crate::io::web_drop::take_dropped()
-                        .map(|file| {
-                            self.update(Message::WebFileDropped(
-                                file.name,
-                                file.bytes,
-                                file.restore_key,
-                            ))
-                        })
-                        .unwrap_or_else(Task::none)
-                } else {
-                    Task::none()
-                };
-                // Dropped raster images register their bytes (name-keyed) and
-                // re-resolve any RasterImage the open drawings reference but
-                // couldn't load — the web stand-in for the drawing folder the
-                // images live beside natively.
-                let mut registered: Vec<String> = Vec::new();
-                while let Some((name, bytes)) = crate::io::web_drop::take_dropped_image() {
-                    crate::scene::model::image_model::register_source(
-                        &name,
-                        std::sync::Arc::new(bytes),
-                    );
-                    registered.push(name);
                 }
-                // Remote http(s) raster refs the background fetch settled:
-                // successes already registered their bytes under the URL (the
-                // fetch task does it), failures surface on the command line —
-                // a network/CORS block, an HTTP status, the size cap, or the
-                // deadline reads differently to the user.
-                use crate::scene::model::image_model::{RemoteFetchError, RemoteFetchOutcome};
-                let mut fetched: Vec<String> = Vec::new();
-                while let Some(outcome) =
-                    crate::scene::model::image_model::take_remote_fetch_outcome()
-                {
-                    match outcome {
-                        RemoteFetchOutcome::Loaded(url) => fetched.push(url),
-                        RemoteFetchOutcome::Failed(url, reason) => {
-                            let note = match reason {
-                                RemoteFetchError::Network => crate::tf!(
-                                    "Remote image \"{url}\" could not be fetched: the network request failed (offline, DNS, or CORS)."
-                                )
-                                .into_owned(),
-                                RemoteFetchError::Status(status) => crate::tf!(
-                                    "Remote image \"{url}\" could not be fetched: the server returned HTTP {status}."
-                                )
-                                .into_owned(),
-                                RemoteFetchError::TooLarge => crate::tf!(
-                                    "Remote image \"{url}\" was not loaded: it exceeds the 64 MB remote-image limit."
-                                )
-                                .into_owned(),
-                                RemoteFetchError::Timeout => crate::tf!(
-                                    "Remote image \"{url}\" could not be fetched: the request timed out."
-                                )
-                                .into_owned(),
-                            };
-                            self.command_line.push_error(&note);
-                        }
-                    }
-                }
-                registered.extend(fetched);
-                if crate::scene::model::image_model::take_overflowed() {
-                    // A settled fetch's rebuild trigger was dropped at the
-                    // outcome cap; do one unconditional catch-up pass over
-                    // every registered name.
-                    registered.extend(crate::scene::model::image_model::registered_image_names());
-                }
-                if !registered.is_empty() {
-                    for tab in self.tabs.iter_mut() {
-                        tab.scene.resolve_registered_image_names(&registered);
-                    }
-                }
-                // Over-budget decode refusals from this poll's re-resolves
-                // reach the command line; the affected images keep their
-                // broken-reference placeholders.
-                for note in crate::scene::model::image_model::take_decode_refusals() {
-                    self.command_line.push_error(&note);
-                }
-                Task::batch([control, dropped])
             }
             #[cfg(not(target_arch = "wasm32"))]
             Message::PollWebControl => Task::none(),
@@ -959,7 +658,6 @@ impl OpenCADStudio {
                 self.control_screenshot(path, screenshot);
                 Task::none()
             }
-            Message::ControlCaptureFrame { redrew } => self.on_control_capture_frame(redrew),
             Message::Graph(message) => self.on_graph(message),
 
             Message::ControlToggle => {
@@ -1004,25 +702,15 @@ impl OpenCADStudio {
             // Web: fetch every script queued by startup language selection or
             // drawing text discovery. Each script has one shared store entry.
             Message::PollWebFonts => {
-                #[cfg(target_arch = "wasm32")]
-                let autosave = if web_autosave_due(self.savetime_min) {
-                    self.on_autosave()
-                } else {
-                    Task::none()
-                };
-                #[cfg(not(target_arch = "wasm32"))]
-                let autosave = Task::none();
                 let pending = crate::scene::text::web_font::take_pending();
                 if pending.is_empty() {
-                    return autosave;
+                    return Task::none();
                 }
-                Task::batch(
-                    std::iter::once(autosave).chain(pending.into_iter().map(|script| {
-                        Task::perform(crate::scene::text::web_font::fetch(script), move |res| {
-                            Message::WebFontLoaded(script, res)
-                        })
-                    })),
-                )
+                Task::batch(pending.into_iter().map(|script| {
+                    Task::perform(crate::scene::text::web_font::fetch(script), move |res| {
+                        Message::WebFontLoaded(script, res)
+                    })
+                }))
             }
 
             // Web: a per-script font arrived. The same bytes feed drawing text,
@@ -1067,27 +755,6 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::UiFontSettingsChanged => Task::perform(
-                async { crate::sys::ui_font::detect() },
-                Message::UiFontDetected,
-            ),
-            #[cfg(target_arch = "wasm32")]
-            Message::UiFontSettingsChanged => Task::none(),
-
-            // Re-setting the defaults recreates the renderers and lays out
-            // every window again with the remapped sans-serif family.
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::UiFontDetected(system) => {
-                if crate::sys::ui_font::apply(system.as_ref()) {
-                    iced::font::set_defaults(iced::Font::DEFAULT, 16.0)
-                } else {
-                    Task::none()
-                }
-            }
-            #[cfg(target_arch = "wasm32")]
-            Message::UiFontDetected(_) => Task::none(),
 
             Message::Tick(t) => self.on_tick(t),
 
@@ -1135,15 +802,6 @@ impl OpenCADStudio {
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.to_string_lossy().into_owned());
-                    // The start page stays clickable under the open overlay,
-                    // so a recent can race an in-flight open and clobber it
-                    // (its WebFileOpened then fails the id check and the
-                    // bytes are lost) — refuse like on_open_file does.
-                    if self.opening.is_some() {
-                        self.command_line
-                            .push_info(crate::t!("An open is already in progress.").as_ref());
-                        return Task::none();
-                    }
                     let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
                         crate::app::OPEN_PHASE_READING,
                     ));
@@ -1283,12 +941,23 @@ impl OpenCADStudio {
             }
 
             Message::SnapOverridePick(t) => {
-                self.apply_snap_override(crate::snap::SnapOverrideKind::Mode(t));
+                self.snap_override_popup = None;
+                self.snapper.set_override(t);
+                let label = crate::snap::ALL_SNAP_MODES
+                    .iter()
+                    .find(|(m, _, _)| *m == t)
+                    .map(|(_, _, l)| *l)
+                    .unwrap_or("Snap");
+                self.command_line
+                    .push_info(crate::tf!("Snap override: {label} (next pick only).").as_ref());
                 Task::none()
             }
 
             Message::SnapOverrideNone => {
-                self.apply_snap_override(crate::snap::SnapOverrideKind::None);
+                self.snap_override_popup = None;
+                self.snapper.set_override_none();
+                self.command_line
+                    .push_info(crate::t!("Snap override: None (next pick only).").as_ref());
                 Task::none()
             }
 
@@ -1361,12 +1030,6 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::SetRecentView(view) => {
-                self.recent_view = view;
-                self.save_config();
-                Task::none()
-            }
-
             Message::RecentLimitInput(s) => {
                 // Keep only digits while typing; applied on Enter (SetRecentLimit).
                 self.recent_limit_input = s.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -1409,104 +1072,17 @@ impl OpenCADStudio {
             }
 
             Message::OpenCancel => {
-                #[cfg(target_arch = "wasm32")]
-                let cancelled_id = self.opening.as_ref().map(|opening| opening.id);
                 if let Some(p) = self.opening.take() {
                     self.command_line
                         .push_info(crate::tf!("Open cancelled: \"{}\"", p.name).as_ref());
                 }
-                // A cancelled recovered open keeps its snapshot (re-offered
-                // next boot — it is the only copy); the remaining queued
-                // snapshots can still be offered this session. Match on the
-                // open's id so cancelling an unrelated open leaves a pending
-                // restore marker alone.
-                #[cfg(target_arch = "wasm32")]
-                if cancelled_id.is_some_and(|id| {
-                    self.web_autosave_consumed
-                        .as_ref()
-                        .is_some_and(|(_, recorded)| *recorded == id)
-                }) && self.web_autosave_consumed.take().is_some()
-                {
-                    self.queue_next_web_autosave_prompt();
-                }
                 self.drain_pending_open()
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WebFileDropped(name, bytes, restore_key) => {
-                // Bytes are already in hand (no picker round-trip), so this is
-                // `on_open_file`'s web branch with the real name and size on
-                // the overlay from the start. An open already in flight must
-                // not be clobbered (its bytes are gone once dequeued), so the
-                // entry goes back to the queue for the next poll tick.
-                if self.opening.is_some() {
-                    // A full queue rejects the bytes here; io-side console
-                    // warning only (the drop path has no user-facing
-                    // surface for rejections by design — see QUEUE_CAP).
-                    let _ = match restore_key {
-                        Some(key) => crate::io::web_drop::enqueue_restore(name, bytes, key),
-                        None => crate::io::web_drop::enqueue_open(name, bytes),
-                    };
-                    return Task::none();
-                }
-                let state = std::sync::Arc::new(crate::io::OpenProgressState::new(
-                    crate::app::OPEN_PHASE_READING,
-                ));
-                let open_id = self.next_open_id();
-                // Identity, not display name: only this exact open may delete
-                // the snapshot the restore came from.
-                if let Some(key) = restore_key {
-                    self.web_autosave_consumed = Some((key, open_id));
-                }
-                self.opening = Some(crate::app::OpenProgress {
-                    id: open_id,
-                    name: name.clone(),
-                    source_path: Some(std::path::PathBuf::from(&name)),
-                    size_bytes: bytes.len() as u64,
-                    state: state.clone(),
-                    started: Instant::now(),
-                    recovery_error: None,
-                    recovery_read_stats: None,
-                    recovery_bytes: None,
-                });
-                Task::perform(
-                    crate::io::web_drop::open_dropped(name, bytes, state),
-                    move |outcome| Message::WebFileOpened(open_id, outcome),
-                )
             }
 
             #[cfg(target_arch = "wasm32")]
             Message::WebFileOpened(open_id, mut outcome) => {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
-                }
-                // A crash-recovery open settling here: success deletes its
-                // OPFS snapshot (the only copy, kept until now); a parse
-                // failure keeps it for the next boot. Either way the next
-                // queued snapshot can be offered again.
-                if self
-                    .web_autosave_consumed
-                    .as_ref()
-                    .is_some_and(|(_, recorded)| *recorded == open_id)
-                {
-                    if outcome.result.is_ok() {
-                        self.web_autosave_opened(&outcome.name);
-                    } else {
-                        self.web_autosave_consumed = None;
-                        self.queue_next_web_autosave_prompt();
-                    }
-                }
-                // A browser tab has a few GB of memory at most; a very large
-                // drawing that fails here usually opens in the desktop app.
-                const WEB_LARGE_DRAWING: u64 = 150 * 1024 * 1024;
-                if outcome.result.is_err() && outcome.size_bytes > WEB_LARGE_DRAWING {
-                    self.command_line.push_info(
-                        crate::tf!(
-                            "This drawing is {} MB, more than the browser version handles reliably. Open it in the desktop app.",
-                            outcome.size_bytes / (1024 * 1024)
-                        )
-                        .as_ref(),
-                    );
                 }
                 if let Some(opening) = self.opening.as_mut() {
                     opening.name = outcome.name.clone();
@@ -1561,27 +1137,7 @@ impl OpenCADStudio {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
                 }
-                let task = self.on_file_opened(name, path, doc, caches);
-                // Web: raster files dropped while this open was in flight
-                // registered after its caches were built — re-resolve any
-                // image the (possibly new) drawing references by name.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let names = crate::scene::model::image_model::registered_image_names();
-                    if !names.is_empty() {
-                        for tab in self.tabs.iter_mut() {
-                            tab.scene.resolve_registered_image_names(&names);
-                        }
-                    }
-                }
-                // Images in (or dropped alongside) the opened drawing that
-                // exceeded the decode budget refused with a note; surface
-                // them now that the open has settled — the entities
-                // themselves show the broken-reference placeholder.
-                for note in crate::scene::model::image_model::take_decode_refusals() {
-                    self.command_line.push_error(&note);
-                }
-                task
+                self.on_file_opened(name, path, doc, caches)
             }
 
             Message::FileOpened(open_id, Err(e)) => {
@@ -1641,37 +1197,6 @@ impl OpenCADStudio {
                     Task::none()
                 }
             },
-
-            // The `?file=` boot deep link settled. Queued bytes are drained by
-            // the control poll's drop queue like any drop — nothing to say
-            // until that open starts (or its parse error surfaces there).
-            #[cfg(target_arch = "wasm32")]
-            Message::WebLinkSettled(outcome) => {
-                use crate::io::web_link::LinkOutcome;
-                match outcome {
-                    LinkOutcome::Queued => {}
-                    LinkOutcome::Info(text) => self.command_line.push_info(&text),
-                    LinkOutcome::Error(text) => self.command_line.push_error(&text),
-                }
-                Task::none()
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WebAutosavesScanned(result) => self.on_web_autosaves_scanned(result),
-            #[cfg(target_arch = "wasm32")]
-            Message::WebAutosaveRestore => self.on_web_autosave_restore(),
-            #[cfg(target_arch = "wasm32")]
-            Message::WebAutosaveRestoreAll => self.on_web_autosave_restore_all(),
-            #[cfg(target_arch = "wasm32")]
-            Message::WebAutosaveDiscard => self.on_web_autosave_discard(),
-            #[cfg(target_arch = "wasm32")]
-            Message::WebAutosaveDefer => self.on_web_autosave_defer(),
-            #[cfg(target_arch = "wasm32")]
-            Message::WebAutosaveBytes(name, key, result) => {
-                self.on_web_autosave_bytes(name, key, result)
-            }
-            #[cfg(target_arch = "wasm32")]
-            Message::WebAutosaveSnapshotFinished(result) => self.on_web_autosave_finished(result),
 
             Message::ImagePick => {
                 Task::perform(crate::io::pick_image_file(), Message::ImagePickResult)
@@ -1873,12 +1398,6 @@ impl OpenCADStudio {
 
             Message::PdfImportPick => Task::perform(
                 async {
-                    // A file named by automation comes back without the picker.
-                    if let Some(path) = crate::sys::take_pdf_import_pick() {
-                        return std::fs::read(&path)
-                            .map(|bytes| (path, std::sync::Arc::new(bytes)))
-                            .map_err(|e| e.to_string());
-                    }
                     let handle = crate::sys::file_dialog()
                         .set_title(crate::t!("Select PDF File").as_ref())
                         .add_filter(crate::t!("PDF Files").as_ref(), &["pdf", "PDF"])
@@ -1910,43 +1429,26 @@ impl OpenCADStudio {
 
                 Task::none()
             }
-            Message::XAttachPick => {
-                // Web: the browser hands back bytes, not a path — read them,
-                // register them name-keyed (so reloads and re-opens of the
-                // host drawing re-resolve the xref in-session) and pre-parse
-                // on the worker in one step. The returned name-only PathBuf
-                // is what the native branch's `handle_path` yields there.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    Task::perform(
-                        crate::io::pick_and_register_xref_web(),
-                        Message::XAttachPickResult,
-                    )
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    Task::perform(
-                        async {
-                            let handle = crate::sys::file_dialog()
-                                .set_title(crate::t!("Select External Reference File").as_ref())
-                                .add_filter(
-                                    crate::t!("CAD Files").as_ref(),
-                                    &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"],
-                                )
-                                .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
-                                .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
-                                .add_filter(crate::t!("Backup Files").as_ref(), &["bak", "BAK"])
-                                .pick_file()
-                                .await;
-                            match handle {
-                                Some(h) => Ok(crate::sys::handle_path(&h)),
-                                None => Err("Cancelled".to_string()),
-                            }
-                        },
-                        Message::XAttachPickResult,
-                    )
-                }
-            }
+            Message::XAttachPick => Task::perform(
+                async {
+                    let handle = crate::sys::file_dialog()
+                        .set_title(crate::t!("Select External Reference File").as_ref())
+                        .add_filter(
+                            crate::t!("CAD Files").as_ref(),
+                            &["dwg", "dxf", "bak", "DWG", "DXF", "BAK"],
+                        )
+                        .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
+                        .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
+                        .add_filter(crate::t!("Backup Files").as_ref(), &["bak", "BAK"])
+                        .pick_file()
+                        .await;
+                    match handle {
+                        Some(h) => Ok(crate::sys::handle_path(&h)),
+                        None => Err("Cancelled".to_string()),
+                    }
+                },
+                Message::XAttachPickResult,
+            ),
 
             Message::XAttachPickResult(Ok(path)) => {
                 self.open_xref_attach_dialog(path);
@@ -1969,15 +1471,10 @@ impl OpenCADStudio {
 
             Message::WblockSave(block_name) => {
                 let name = block_name.clone();
-                let title = if block_name == "-" {
-                    crate::t!("Create Drawing File").into_owned()
-                } else {
-                    crate::t!("Save Block As").into_owned()
-                };
                 Task::perform(
                     async move {
                         let path = crate::sys::file_dialog()
-                            .set_title(&title)
+                            .set_title(crate::t!("Save Block As").as_ref())
                             .set_file_name("block.dwg")
                             .add_filter(crate::t!("DWG Files").as_ref(), &["dwg"])
                             .save_file()
@@ -1989,11 +1486,6 @@ impl OpenCADStudio {
                 )
             }
 
-            // -WBLOCK with FILEDIA 1: the file came from the dialog, the
-            // command line asks for the rest.
-            Message::WblockSaveResult(block_name, Some(path)) if block_name == "-" => {
-                self.dispatch_command(&format!("_-WBLOCKFILE {}", path.display()))
-            }
             Message::WblockSaveResult(block_name, Some(path)) => {
                 self.on_wblock_save_result_some(block_name, path)
             }
@@ -2001,35 +1493,16 @@ impl OpenCADStudio {
             Message::WblockSaveResult(_, None) => Task::none(),
 
             Message::WblockWriteFinished(block_name, path, result) => {
-                // A written file is not reported (as in the reference); a
-                // failed write is.
-                let _ = (&block_name, &path);
-                if let Err(error) = result {
-                    self.command_line
-                        .push_error(crate::tf!("WBLOCK save failed: {error}").as_ref());
+                match result {
+                    Ok(()) => self.command_line.push_output(
+                        crate::tf!("WBLOCK  Saved \"{block_name}\" → \"{}\"", path.display())
+                            .as_ref(),
+                    ),
+                    Err(error) => self
+                        .command_line
+                        .push_error(crate::tf!("WBLOCK save failed: {error}").as_ref()),
                 }
                 Task::none()
-            }
-
-            // Web WBLOCK completion: the download is the only artifact of
-            // the save — fire it even if the source tab was closed while
-            // serialization ran — then reuse the WblockWriteFinished
-            // bookkeeping for the command-line report.
-            #[cfg(target_arch = "wasm32")]
-            Message::WebWblockSerialized {
-                block_name,
-                path,
-                filename,
-                result,
-            } => {
-                if let Ok(bytes) = &result {
-                    crate::sys::download_bytes(&filename, bytes);
-                }
-                self.update(Message::WblockWriteFinished(
-                    block_name,
-                    path,
-                    result.map(|_| ()),
-                ))
             }
 
             Message::TableInsertStyle(value) => self.on_table_insert_style(value),
@@ -2068,12 +1541,8 @@ impl OpenCADStudio {
                 self.on_data_extraction_browse_settings_result(path)
             }
             Message::DataExtractionAddDrawings => self.on_data_extraction_add_drawings(),
-            Message::DataExtractionAddDrawingsResult(Ok(paths)) => {
+            Message::DataExtractionAddDrawingsResult(paths) => {
                 self.on_data_extraction_add_drawings_result(paths)
-            }
-            Message::DataExtractionAddDrawingsResult(Err(error)) => {
-                self.data_extraction.error = error;
-                Task::none()
             }
             Message::DataExtractionAddFolder => self.on_data_extraction_add_folder(),
             Message::DataExtractionAddFolderResult(path) => {
@@ -2108,22 +1577,13 @@ impl OpenCADStudio {
             }
 
             Message::DataExtractionSaveResult(csv, Some(path)) => {
-                let fname = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
-                // The browser has no writable path behind the picked name:
-                // the CSV leaves as a download instead of an fs::write.
-                #[cfg(target_arch = "wasm32")]
-                let write_result: Result<(), String> = {
-                    crate::sys::download_bytes(&fname, csv.as_bytes());
-                    Ok(())
-                };
-                #[cfg(not(target_arch = "wasm32"))]
-                let write_result = std::fs::write(&path, csv.as_bytes()).map_err(|e| e.to_string());
-                match write_result {
+                match std::fs::write(&path, csv.as_bytes()) {
                     Ok(()) => {
                         let rows = csv.lines().count().saturating_sub(1);
+                        let fname = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.to_string_lossy().into_owned());
                         self.command_line.push_output(
                             crate::tf!("DATAEXTRACTION  {rows} rows → \"{fname}\"").as_ref(),
                         );
@@ -2144,37 +1604,19 @@ impl OpenCADStudio {
                         .push_error(crate::t!("STLOUT: no 3D mesh data in this drawing.").as_ref());
                     return Task::none();
                 }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    Task::perform(
-                        async {
-                            crate::sys::file_dialog()
-                                .set_title(crate::t!("Export STL").as_ref())
-                                .set_file_name("export.stl")
-                                .add_filter(crate::t!("STL Files").as_ref(), &["stl"])
-                                .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                                .save_file()
-                                .await
-                                .map(|h| crate::sys::handle_path(&h))
-                        },
-                        Message::StlExportPath,
-                    )
-                }
-                // Web: rfd's save dialog shows no UI, so skip straight to a
-                // virtual path — the browser download supplies the file name.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let stem = self.tabs[i]
-                        .current_path
-                        .as_deref()
-                        .and_then(|p: &std::path::Path| p.file_stem())
-                        .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "drawing".into());
-                    Task::perform(
-                        crate::io::stl::pick_stl_path_owned(stem),
-                        Message::StlExportPath,
-                    )
-                }
+                Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Export STL").as_ref())
+                            .set_file_name("export.stl")
+                            .add_filter(crate::t!("STL Files").as_ref(), &["stl"])
+                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                            .save_file()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h))
+                    },
+                    Message::StlExportPath,
+                )
             }
 
             Message::StlExportPath(Some(path)) => self.on_stl_export_path_some(path),
@@ -2202,93 +1644,19 @@ impl OpenCADStudio {
                     );
                     return Task::none();
                 }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    Task::perform(
-                        async {
-                            crate::sys::file_dialog()
-                                .set_title(crate::t!("Export STEP AP203").as_ref())
-                                .set_file_name("export.step")
-                                .add_filter(crate::t!("STEP Files").as_ref(), &["step", "stp"])
-                                .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                                .save_file()
-                                .await
-                                .map(|h| crate::sys::handle_path(&h))
-                        },
-                        Message::StepExportPath,
-                    )
-                }
-                // Web: rfd's save dialog shows no UI, so skip straight to a
-                // virtual path — the browser download supplies the file name.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let stem = self.tabs[i]
-                        .current_path
-                        .as_deref()
-                        .and_then(|p: &std::path::Path| p.file_stem())
-                        .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "drawing".into());
-                    Task::perform(
-                        crate::io::step::pick_step_path_owned(stem),
-                        Message::StepExportPath,
-                    )
-                }
-            }
-
-            // ── FBX export ────────────────────────────────────────────────
-            Message::FbxExport => {
-                let i = self.active_tab;
-                if self.tabs[i].scene.meshes.is_empty() {
-                    self.command_line.push_error(
-                        crate::t!("FBXEXPORT: no 3D mesh data in this drawing.").as_ref(),
-                    );
-                    return Task::none();
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    Task::perform(
-                        async {
-                            crate::sys::file_dialog()
-                                .set_title(crate::t!("Export FBX").as_ref())
-                                .set_file_name("export.fbx")
-                                .add_filter(crate::t!("FBX Files").as_ref(), &["fbx"])
-                                .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                                .save_file()
-                                .await
-                                .map(|h| crate::sys::handle_path(&h))
-                        },
-                        Message::FbxExportPath,
-                    )
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let stem = self.tabs[i]
-                        .current_path
-                        .as_deref()
-                        .and_then(|p: &std::path::Path| p.file_stem())
-                        .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "drawing".into());
-                    Task::perform(
-                        crate::io::fbx::pick_fbx_path_owned(stem),
-                        Message::FbxExportPath,
-                    )
-                }
-            }
-
-            Message::FbxExportPath(Some(path)) => self.on_fbx_export_path_some(path),
-
-            Message::FbxExportPath(None) => Task::none(),
-
-            Message::FbxExportFinished(path, result) => {
-                match result {
-                    Ok(()) => self.command_line.push_output(
-                        crate::tf!("FBXEXPORT: exported to \"{}\"", path.display()).as_ref(),
-                    ),
-                    Err(error) => self
-                        .command_line
-                        .push_error(crate::tf!("FBXEXPORT: {error}").as_ref()),
-                }
-                Task::none()
+                Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Export STEP AP203").as_ref())
+                            .set_file_name("export.step")
+                            .add_filter(crate::t!("STEP Files").as_ref(), &["step", "stp"])
+                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                            .save_file()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h))
+                    },
+                    Message::StepExportPath,
+                )
             }
 
             Message::StepExportPath(Some(path)) => self.on_step_export_path_some(path),
@@ -2308,7 +1676,6 @@ impl OpenCADStudio {
             }
 
             // ── OBJ import ────────────────────────────────────────────────
-            #[cfg(not(target_arch = "wasm32"))]
             Message::ObjImport => Task::perform(
                 async {
                     crate::sys::file_dialog()
@@ -2321,39 +1688,6 @@ impl OpenCADStudio {
                 },
                 Message::ObjImportPath,
             ),
-
-            // Web: the browser picker hands back a handle whose bytes must be
-            // read directly — the name-only `PathBuf` it maps to cannot be
-            // opened — so pick, read, and parse in one step and feed the
-            // shared finished handler. A cancelled picker stays silent.
-            #[cfg(target_arch = "wasm32")]
-            Message::ObjImport => {
-                let tab_id = self.tabs[self.active_tab].id;
-                Task::perform(
-                    async move {
-                        let handle = crate::sys::file_dialog()
-                            .set_title(crate::t!("Import OBJ Mesh").as_ref())
-                            .add_filter(crate::t!("Wavefront OBJ").as_ref(), &["obj", "OBJ"])
-                            .add_filter(crate::t!("All Files").as_ref(), &["*"])
-                            .pick_file()
-                            .await?;
-                        let path = crate::sys::handle_path(&handle);
-                        let bytes = handle.read().await;
-                        let result = crate::io::obj::parse_obj(
-                            &String::from_utf8_lossy(&bytes),
-                            [0.7, 0.7, 0.85, 1.0],
-                        )
-                        .ok_or_else(|| "no usable geometry in file".to_string());
-                        Some((tab_id, path, result))
-                    },
-                    |picked| match picked {
-                        Some((tab_id, path, result)) => {
-                            Message::ObjImportFinished(tab_id, path, result)
-                        }
-                        None => Message::Noop,
-                    },
-                )
-            }
 
             Message::ObjImportPath(Some(path)) => self.on_obj_import_path_some(path),
 
@@ -2499,16 +1833,11 @@ impl OpenCADStudio {
             }
 
             Message::PdfDialog(message) => self.update_pdf_dialog(message),
-            Message::ImportDialog(message) => self.update_import_dialog(message),
             Message::AttdefDialog(message) => self.on_attdef_dialog(message),
-            Message::AttMan(message) => self.on_attman(message),
             Message::FieldDialog(message) => self.on_field_dialog(message),
-            Message::RefEditDialog(message) => self.update_refedit_dialog(message),
-            Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
             Message::Count(message) => self.on_count(message),
             Message::SheetSet(message) => self.on_sheet_set(message),
-            Message::KeyTip(input) => self.on_keytip(input),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
                 Task::none()
@@ -2981,24 +2310,6 @@ impl OpenCADStudio {
                 ))
             }
 
-            Message::CommandLineSpaceProbe => iced::widget::operation::is_focused(
-                iced::widget::Id::new(crate::ui::command_line::CMD_INPUT_ID),
-            )
-            .map(|focused| {
-                if focused {
-                    Message::CommandLineSpaceResolved
-                } else {
-                    Message::Noop
-                }
-            }),
-
-            Message::CommandLineSpaceResolved => {
-                if self.command_line.input.ends_with(' ') {
-                    self.command_line.input.pop();
-                }
-                self.update(Message::ShortcutPressed("SPACE".to_string()))
-            }
-
             Message::CommandLineArrowProbe {
                 direction,
                 extend_selection,
@@ -3061,11 +2372,6 @@ impl OpenCADStudio {
                 self.command_line.literal_spaces = !self.command_line.literal_spaces;
                 self.save_config();
                 self.focus_cmd_input()
-            }
-
-            Message::CommandHistoryHover(hovered) => {
-                self.command_line.set_history_hover(hovered);
-                Task::none()
             }
 
             Message::CommandHistoryToggle => {
@@ -3216,9 +2522,6 @@ impl OpenCADStudio {
                 // finishes the step like Enter. (#304)
                 self.command_line.input.clear();
                 self.command_line.close_history();
-                if self.awaiting_fill_close_answer() {
-                    return self.on_graphic_fill_close_input(&kw);
-                }
                 if kw.is_empty() {
                     return self.feed_command(crate::command::StepInput::Enter);
                 }
@@ -3291,59 +2594,28 @@ impl OpenCADStudio {
 
             Message::ScriptLine(line) => self.feed_script_line(&line),
 
-            // Web SCRIPT: the picked .scr file arrived — run it through the
-            // same runner the native path feeds.
-            #[cfg(target_arch = "wasm32")]
-            Message::ScriptFilePicked(Some((name, text))) => self.run_script(&name, &text),
-            #[cfg(target_arch = "wasm32")]
-            Message::ScriptFilePicked(None) => Task::none(),
-
-            // Web DATALINK: the picked .csv's bytes arrived — register them
-            // as the link's in-session source, then run the same table-insert
-            // path the native typed-path command feeds.
-            #[cfg(target_arch = "wasm32")]
-            Message::DataLinkCsvPicked(picked) => self.on_datalink_csv_picked(picked),
-
-            // Web CENTERLTYPEFILE: the picked .lin/.dnl file's text arrived —
-            // load its linetypes, then record the setting under the file's
-            // name (the native command reads the typed path inside
-            // `set_centerline_setting` instead).
-            #[cfg(target_arch = "wasm32")]
-            Message::CenterlineLinetypeFilePicked(Some((name, source))) => {
-                let i = self.active_tab;
-                crate::io::linetypes::populate_document_from_source(
-                    &mut self.tabs[i].scene.document,
-                    &source,
-                );
-                match self.tabs[i]
-                    .scene
-                    .set_centerline_setting("CENTERLTYPEFILE", &name)
-                {
-                    Ok(message) => {
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(&message);
-                    }
-                    Err(error) => self.command_line.push_error(&error),
-                }
-                Task::none()
-            }
-            #[cfg(target_arch = "wasm32")]
-            Message::CenterlineLinetypeFilePicked(None) => Task::none(),
-
             Message::ToggleLayers => {
-                if self.show_layers {
-                    return self.on_dock(crate::ui::dock::DockMsg::Close(
-                        crate::ui::dock::PanelId::Layers,
-                    ));
+                if self.active_modal == Some(super::ModalKind::Layers) {
+                    self.ribbon.deactivate_tool_if("LAYERS");
+                    self.active_modal = None;
+                    self.reset_modal_geometry();
+                } else {
+                    self.sync_ribbon_layers();
+                    self.active_modal = Some(super::ModalKind::Layers);
                 }
-                self.open_layers_pallet();
                 Task::none()
             }
 
             Message::ToggleXrefManager => {
                 self.show_external_references ^= true;
                 if self.show_external_references {
-                    self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);
+                    use crate::app::config::DockSide;
+                    use crate::ui::dock::PanelId;
+                    if self.dock.location(PanelId::ExternalReferences).is_none() {
+                        self.dock
+                            .dock(PanelId::ExternalReferences, DockSide::Right, usize::MAX);
+                    }
+                    self.dock_expanded = Some(PanelId::ExternalReferences);
                     self.refresh_xref_manager();
                 }
                 Task::none()
@@ -3633,61 +2905,10 @@ impl OpenCADStudio {
             }
             // ── Layer Translator (#624) ──────────────────────────────────
             Message::LayerTranslatorLoad => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    Task::perform(crate::io::pick_layer_standard_path(), |path| match path {
-                        Some(path) => Message::LayerTranslatorLoaded(path),
-                        None => Message::Noop,
-                    })
-                }
-                // Web: read the picked file's bytes and parse them on the
-                // worker right away — a name-only path has nothing behind it
-                // for `load_targets` to read later.
-                #[cfg(target_arch = "wasm32")]
-                {
-                    Task::perform(
-                        async {
-                            crate::io::pick_and_parse_web(
-                                crate::t!("Load layer standard").as_ref(),
-                                crate::t!("Drawings and standards").as_ref(),
-                                &["dwg", "dws", "dwt", "dxf", "DWG", "DWS", "DWT", "DXF"],
-                            )
-                            .await
-                            .and_then(|picked| {
-                                picked.map_or(Ok(None), |(name, document)| {
-                                    crate::modules::draw::layers::laytrans::targets_from_document(
-                                        &document,
-                                    )
-                                    .map(|targets| Some((name, targets)))
-                                })
-                            })
-                        },
-                        |loaded| Message::LayerTranslatorLoadedWeb(loaded),
-                    )
-                }
-            }
-            #[cfg(target_arch = "wasm32")]
-            Message::LayerTranslatorLoadedWeb(loaded) => {
-                match loaded {
-                    Ok(Some((source_file, targets))) => {
-                        let state = self.layer_translator.get_or_insert_with(Default::default);
-                        state.source_file = source_file;
-                        state.targets = targets;
-                        // A target set that no longer contains a mapped name
-                        // would translate onto nothing.
-                        let names: Vec<String> =
-                            state.targets.iter().map(|t| t.name.clone()).collect();
-                        state
-                            .mappings
-                            .retain(|m| names.iter().any(|n| n.eq_ignore_ascii_case(&m.to)));
-                        state.selected_to = None;
-                    }
-                    Err(why) => self
-                        .command_line
-                        .push_error(crate::tf!("LAYTRANS: {why}.").as_ref()),
-                    Ok(None) => {}
-                }
-                Task::none()
+                Task::perform(crate::io::pick_layer_standard_path(), |path| match path {
+                    Some(path) => Message::LayerTranslatorLoaded(path),
+                    None => Message::Noop,
+                })
             }
             Message::LayerTranslatorLoaded(path) => {
                 use crate::modules::draw::layers::laytrans;
@@ -3900,7 +3121,11 @@ impl OpenCADStudio {
                     .map(|layer| layer.name.clone())
                     .collect();
                 self.push_undo_snapshot(i, "LAYERSTATE RESTORE");
-                let restored = self.restore_layer_state_here(i, &name);
+                let restored = self.tabs[i]
+                    .scene
+                    .document
+                    .restore_layer_state(&name)
+                    .unwrap_or(0);
                 let active = self.tabs[i]
                     .scene
                     .document
@@ -4142,7 +3367,11 @@ impl OpenCADStudio {
 
             Message::WindowCloseRequested(id) => {
                 if self.main_window == Some(id) {
-                    return self.request_quit_with_block_edits();
+                    if self.tabs.iter().any(|t| t.dirty) {
+                        self.pending_close = Some(super::PendingClose::Quit);
+                        return self.open_unsaved_dialog_window();
+                    }
+                    return self.exit_app();
                 }
                 Task::none()
             }
@@ -4418,21 +3647,6 @@ impl OpenCADStudio {
 
             Message::LayerRenameCommit => self.on_layer_rename_commit(),
 
-            // A click moved focus off the name field: keep what was typed, as
-            // Enter would. An untouched name stays open (the field may not have
-            // taken focus yet on the click that opened it).
-            Message::LayerRenameFocus(focused) => {
-                let layers = &self.tabs[self.active_tab].layers;
-                let typed = layers
-                    .editing
-                    .as_ref()
-                    .is_some_and(|name| *name != layers.edit_buf);
-                if typed && focused != Some(crate::ui::window::layers::rename_input_id()) {
-                    return self.on_layer_rename_commit();
-                }
-                Task::none()
-            }
-
             Message::LayerColorPickerToggle(name) => {
                 let i = self.active_tab;
                 let Some(idx) = self.layer_panel_index(i, &name) else {
@@ -4462,7 +3676,38 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::LayerColorSet(color) => self.set_layer_color(color, None),
+            Message::LayerColorSet(color) => {
+                let i = self.active_tab;
+                // Apply to every selected layer (multi-select), not just one.
+                let names = self.selected_layer_names(i);
+                if !names.is_empty() {
+                    let undo = self.begin_layer_undo(i, "LAYER COLOR", &names);
+                    for name in &names {
+                        if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
+                            dl.color = color;
+                            dl.color_name = None;
+                            dl.book_name = None;
+                        }
+                    }
+                    for pl in self.tabs[i].layers.layers.iter_mut() {
+                        if names.contains(&pl.name) {
+                            pl.color = color;
+                            pl.color_name = None;
+                            pl.book_name = None;
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.commit_layer_undo(i, undo);
+                    // ByLayer color is baked into the cached wires at
+                    // tessellation time, so bump the geometry epoch to
+                    // invalidate the wire cache and repaint with the new color.
+                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    self.tabs[i].layers.color_picker_row = None;
+                    self.tabs[i].layers.color_full_palette = false;
+                    self.sync_ribbon_layers();
+                }
+                Task::none()
+            }
 
             Message::LayerLinetypeSet(lt) => {
                 let i = self.active_tab;
@@ -4552,38 +3797,6 @@ impl OpenCADStudio {
             // ── Cursor / viewport messages ─────────────────────────────────
             Message::CursorMoved(p, viewport) => self.on_cursor_moved(p, viewport),
 
-            // A multi-finger gesture owns the pointer while it runs.
-            Message::ViewportMove(_)
-            | Message::ViewportLeftPressAt(_)
-            | Message::ViewportLeftPress
-            | Message::ViewportLeftRelease
-            | Message::PaneMove(..)
-            | Message::PanePress(_)
-            | Message::PaneRelease(_)
-                if self.touch.active() =>
-            {
-                Task::none()
-            }
-
-            // CATIA navigation: the left button pressed during a middle drag
-            // turns the drag into an orbit instead of starting a pick.
-            Message::ViewportLeftPressAt(_) | Message::ViewportLeftPress | Message::PanePress(_)
-                if self.navigation_style == crate::app::settings::NavigationStyle::Catia
-                    && self.tabs[self.active_tab]
-                        .scene
-                        .selection
-                        .borrow()
-                        .input
-                        .middle_down =>
-            {
-                self.nav_left_with_middle = true;
-                Task::none()
-            }
-            Message::ViewportLeftRelease | Message::PaneRelease(_) if self.nav_left_with_middle => {
-                self.nav_left_with_middle = false;
-                Task::none()
-            }
-
             Message::ViewportMove(p) => self.on_viewport_move(p),
 
             Message::ViewportExit => self.on_viewport_exit(),
@@ -4593,7 +3806,7 @@ impl OpenCADStudio {
             Message::PaneClicked(pane) => self.on_pane_clicked(pane),
             Message::PaneDragged(ev) => self.on_pane_dragged(ev),
             Message::PaneMove(idx, local) => {
-                if self.color_picker.is_some() {
+                if self.color_pick_target.is_some() {
                     return Task::none();
                 }
                 let p = self.pane_canvas_point(idx, local);
@@ -4658,19 +3871,7 @@ impl OpenCADStudio {
                 self.update(Message::ViewportScroll(d))
             }
 
-            Message::ViewportLeftPressAt(position) => {
-                // Use the pointer location captured by the actual button
-                // event. The last hover can lag behind fast cursor motion,
-                // particularly while expensive OSNAP/OTRACK previews run.
-                // Refresh the snap and world point before accepting the pick.
-                let moved = self.on_viewport_move(position);
-                self.graphic_attributes.open_menu = None;
-                let sweep = self.sync_active_field_if_any();
-                Task::batch(vec![moved, sweep, self.on_viewport_left_press()])
-            }
-
             Message::ViewportLeftPress => {
-                self.graphic_attributes.open_menu = None;
                 let sweep = self.sync_active_field_if_any();
                 Task::batch(vec![sweep, self.on_viewport_left_press()])
             }
@@ -4678,9 +3879,7 @@ impl OpenCADStudio {
             Message::ViewportLeftRelease => self.on_viewport_left_release(),
 
             Message::ViewportRightPress => {
-                self.graphic_attributes.open_menu = None;
                 let i = self.active_tab;
-                self.tabs[i].measurement.dismiss_result();
                 self.ribbon.close_dropdown();
                 // Shift+RMB: the one-shot snap override menu at the cursor —
                 // pick a snap for just the next point, then it expires (#337).
@@ -4782,13 +3981,9 @@ impl OpenCADStudio {
                 self.unfocus_widgets()
             }
 
-            Message::ViewportMiddlePress => {
-                self.graphic_attributes.open_menu = None;
-                self.on_viewport_middle_press()
-            }
+            Message::ViewportMiddlePress => self.on_viewport_middle_press(),
 
             Message::ViewportMiddleRelease => {
-                self.nav_left_with_middle = false;
                 let i = self.active_tab;
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
                 sel.input.middle_down = false;
@@ -5114,25 +4309,9 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ToggleProperties => {
-                let id = crate::ui::dock::PanelId::Properties;
-                let open = !self.dock_panel_visible(id);
-                if self.clean_screen {
-                    // Shown over clean screen without changing the panel's
-                    // normal state.
-                    self.clean_screen_properties = open;
-                    if !open {
-                        return Task::none();
-                    }
-                }
-                self.dock_set_open(id, open)
-            }
-            Message::ToggleGraphicAttributes => {
-                let id = crate::ui::dock::PanelId::GraphicAttributes;
-                let open = !self.show_graphic_attributes;
-                if open {
-                    self.dock.dock_below_properties(id);
-                }
-                self.dock_set_open(id, open)
+                self.show_properties ^= true;
+                self.ribbon.set_properties(self.show_properties);
+                Task::none()
             }
             Message::ToggleFileTabs => {
                 self.show_file_tabs ^= true;
@@ -5314,11 +4493,7 @@ impl OpenCADStudio {
             }
             Message::PropHyperlinkOpen => {
                 let i = self.active_tab;
-                self.hyperlink_editor_block = None;
                 let handles = self.property_target_handles(i);
-                if handles.is_empty() && self.open_block_property_hyperlink(i) {
-                    return Task::none();
-                }
                 if handles.is_empty() {
                     return Task::none();
                 }
@@ -5378,9 +4553,6 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let description = self.hyperlink_editor_description.trim().to_owned();
-                if self.hyperlink_editor_block.is_some() {
-                    return self.apply_block_property_hyperlink(&url, &description);
-                }
                 if let Some(block_def) = self.block_definition.as_mut() {
                     block_def.hyperlink_url = url;
                     block_def.hyperlink_desc = description;
@@ -5410,9 +4582,6 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::HyperlinkRemove => {
-                if self.hyperlink_editor_block.is_some() {
-                    return self.apply_block_property_hyperlink("", "");
-                }
                 if let Some(block_def) = self.block_definition.as_mut() {
                     block_def.hyperlink_url.clear();
                     block_def.hyperlink_desc.clear();
@@ -5643,7 +4812,6 @@ impl OpenCADStudio {
             }
             Message::ToggleCleanScreen => {
                 self.clean_screen ^= true;
-                self.clean_screen_properties = false;
                 Task::none()
             }
             Message::ToggleTransparencyDisplay => {
@@ -5794,8 +4962,6 @@ impl OpenCADStudio {
                     header.angle_base = degrees.to_radians();
                 }
                 header.insertion_units = state.insertion_units;
-                self.tabs[i].scene.sync_annotation_scale_from_header();
-                self.tabs[i].scene.invalidate_annotation_dependencies();
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
                 self.refresh_properties();
@@ -5812,23 +4978,14 @@ impl OpenCADStudio {
                     state.error_message = None;
                     state.confirm_redefine = None;
                 }
-                self.refresh_block_definition_preview();
                 Task::none()
             }
             Message::BlockDefNameSelect(chosen) => {
                 if let Some(state) = self.block_definition.as_mut() {
-                    state.name = chosen.clone();
+                    state.name = chosen;
                     state.error_message = None;
                     state.confirm_redefine = None;
-                    // Redefining an existing block starts from the base point
-                    // that definition already has (0.0000 for a new block).
-                    let base = crate::scene::render_graph::block_base_point(
-                        &self.tabs[self.active_tab].scene.document,
-                        &chosen,
-                    );
-                    state.set_base_point(glam::DVec3::new(base.x, base.y, base.z));
                 }
-                self.refresh_block_definition_preview();
                 Task::none()
             }
             Message::BlockDefBaseOnScreen(val) => {
@@ -5933,7 +5090,6 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::BlockDefHyperlink => {
-                self.hyperlink_editor_block = None;
                 if let Some(state) = self.block_definition.as_ref() {
                     self.hyperlink_editor_url = state.hyperlink_url.clone();
                     self.hyperlink_editor_description = state.hyperlink_desc.clone();
@@ -5947,12 +5103,6 @@ impl OpenCADStudio {
             Message::BlockDefDismissError => {
                 if let Some(state) = self.block_definition.as_mut() {
                     state.error_message = None;
-                }
-                Task::none()
-            }
-            Message::BlockDefOpenInEditor(on) => {
-                if let Some(state) = self.block_definition.as_mut() {
-                    state.open_in_editor = on;
                 }
                 Task::none()
             }
@@ -5971,21 +5121,19 @@ impl OpenCADStudio {
                 }
                 self.commit_block_definition(true)
             }
-            m @ (Message::BlockDefApply | Message::BlockDefCreateEmpty) => {
-                let create_empty = matches!(m, Message::BlockDefCreateEmpty);
+            Message::BlockDefApply => {
                 let Some(state) = self.block_definition.as_mut() else {
                     return Task::none();
                 };
                 let name = state.name.trim().to_string();
                 if name.is_empty() {
-                    state.error_message = Some(
-                        crate::t!("The name must be at least one character long.").into_owned(),
-                    );
+                    state.error_message =
+                        Some(crate::t!("Block name cannot be empty.").into_owned());
                     return Task::none();
                 }
                 if let Some(_ch) = state.invalid_name_char() {
                     state.error_message = Some(
-                        crate::t!("The name contains unsupported characters. The following characters are not supported: \\ < > / ? \" : ; * | , = `")
+                        crate::t!("Block name cannot contain: \\ / : * ? \" < > | = `")
                             .into_owned(),
                     );
                     return Task::none();
@@ -5995,16 +5143,15 @@ impl OpenCADStudio {
                         Some(crate::t!("Block name cannot start with '*'.").into_owned());
                     return Task::none();
                 }
-                // No objects: the band offers to select some or to define
-                // an empty block.
-                if !state.objects_specify_onscreen
-                    && state.selected_handles.is_empty()
-                    && !create_empty
-                {
-                    state.empty_prompt = true;
+                if !state.objects_specify_onscreen && state.selected_handles.is_empty() {
+                    state.error_message = Some(
+                        crate::t!(
+                            "No objects selected. You must select objects to define a block."
+                        )
+                        .into_owned(),
+                    );
                     return Task::none();
                 }
-                state.empty_prompt = false;
                 let i = self.active_tab;
                 if self.tabs[i]
                     .scene
@@ -6224,27 +5371,96 @@ impl OpenCADStudio {
 
                 let state = self.wblock.take().unwrap();
                 self.active_modal = None;
-                use crate::modules::insert::block_cmdline::WblockSource;
-                use crate::ui::window::block_definition::BlockObjectMode;
-                let mode = match state.object_mode {
-                    WblockObjectMode::Retain => BlockObjectMode::Retain,
-                    WblockObjectMode::Convert => BlockObjectMode::Convert,
-                    WblockObjectMode::Delete => BlockObjectMode::Delete,
-                };
-                crate::modules::insert::block_cmdline::defaults().wblock_mode = mode;
-                self.persist_settings_if_changed();
-                let source = match state.source_mode {
-                    WblockSourceMode::Block => {
-                        WblockSource::Block(state.block_name.trim().to_string())
+                let document = self.tabs[i].scene.document_for_save();
+                let source_mode = state.source_mode;
+                let block_name = state.block_name.trim().to_string();
+                let handles = state.selected_handles.clone();
+                let base_point = state.parse_base_point();
+                let unit = state.unit;
+                let object_mode = state.object_mode;
+
+                if source_mode == WblockSourceMode::Objects {
+                    match object_mode {
+                        WblockObjectMode::Retain => {}
+                        WblockObjectMode::Delete => {
+                            self.push_undo_snapshot(i, "WBLOCK");
+                            self.tabs[i].scene.erase_entities(&handles);
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].scene.bump_geometry();
+                            self.refresh_properties();
+                        }
+                        WblockObjectMode::Convert => {
+                            let block_name_for_conv = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("WBLOCK")
+                                .to_string();
+                            self.push_undo_snapshot(i, "WBLOCK");
+                            let ucs = self.tabs[i].ucs_xform();
+                            let world_to_block = ucs.to_ucs_transform_at(base_point);
+                            let block_to_world = ucs.to_wcs_transform_at(base_point);
+                            let options = crate::scene::CreateBlockOptions {
+                                name: block_name_for_conv,
+                                handles: handles.clone(),
+                                base_point,
+                                world_to_block,
+                                block_to_world,
+                                mode: crate::ui::window::block_definition::BlockObjectMode::Convert,
+                                annotative: false,
+                                match_orientation: false,
+                                scale_uniformly: false,
+                                allow_exploding: true,
+                                unit,
+                                description: String::new(),
+                                hyperlink_url: String::new(),
+                                hyperlink_desc: String::new(),
+                                redefine: true,
+                            };
+                            let _ = self.tabs[i].scene.create_block_with_options(options);
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].scene.bump_geometry();
+                            self.refresh_properties();
+                        }
                     }
-                    WblockSourceMode::EntireDrawing => WblockSource::Drawing,
-                    WblockSourceMode::Objects => WblockSource::Objects {
-                        handles: state.selected_handles.clone(),
-                        base: state.parse_base_point(),
-                        mode,
-                    },
+                }
+
+                let worker_path = path.clone();
+                let display_name = match source_mode {
+                    WblockSourceMode::Block => block_name.clone(),
+                    WblockSourceMode::EntireDrawing => "*".to_string(),
+                    WblockSourceMode::Objects => "*".to_string(),
                 };
-                self.wblock_write(i, source, path, state.unit)
+                let worker_display = display_name.clone();
+
+                file::background_task(
+                    crate::t!("WBLOCK save"),
+                    move || {
+                        let out_doc = match source_mode {
+                            WblockSourceMode::Block => {
+                                let mut d = crate::modules::insert::wblock::extract_block_to_doc(
+                                    &document,
+                                    &block_name,
+                                )
+                                .map_err(|e| e.to_string())?;
+                                d.header.insertion_units = unit;
+                                d
+                            }
+                            WblockSourceMode::EntireDrawing => {
+                                let mut d = document.clone();
+                                d.header.insertion_units = unit;
+                                d
+                            }
+                            WblockSourceMode::Objects => {
+                                crate::modules::insert::wblock::extract_entities_to_doc_with_base(
+                                    &document, &handles, base_point, unit,
+                                )
+                                .map_err(|e| e.to_string())?
+                            }
+                        };
+                        crate::io::save(&out_doc, &worker_path).map_err(|e| e.to_string())
+                    },
+                    move |result| Message::WblockWriteFinished(worker_display, path, result),
+                )
             }
             Message::ToleranceDialogField(field) => {
                 if let Some(state) = self.geometric_tolerance.as_mut() {
@@ -6317,8 +5533,6 @@ impl OpenCADStudio {
                 // menu having done nothing. (#668)
                 self.push_undo_snapshot(i, "UNITS");
                 self.tabs[i].scene.document.header.insertion_units = code;
-                self.tabs[i].scene.sync_annotation_scale_from_header();
-                self.tabs[i].scene.invalidate_annotation_dependencies();
                 self.tabs[i].dirty = true;
                 let label = crate::modules::draw::units::label(code);
                 self.command_line.push_output(
@@ -6444,12 +5658,6 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::DraftingSettingsToggleGridAxes => {
-                if let Some(state) = &mut self.drafting_settings_state {
-                    state.grid_axes = !state.grid_axes;
-                }
-                Task::none()
-            }
             Message::DraftingSettingsToggleEqualSnap => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.snap_equal = !state.snap_equal;
@@ -6487,12 +5695,6 @@ impl OpenCADStudio {
             Message::DraftingSettingsToggleOrtho => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.ortho_on = !state.ortho_on;
-                }
-                Task::none()
-            }
-            Message::DraftingSettingsOsnapApertureChanged(value) => {
-                if let Some(state) = &mut self.drafting_settings_state {
-                    state.osnap_aperture_input = value;
                 }
                 Task::none()
             }
@@ -6594,6 +5796,469 @@ impl OpenCADStudio {
             }
             Message::DraftingSettingsCloseKeep => {
                 self.drafting_settings_close_confirm = false;
+                Task::none()
+            }
+            // ── Surface Properties Dialog ─────────────────────────────────────────
+            Message::OpenSurfaceProperties(handle) => {
+                let tab_idx = self.active_tab;
+                if let Some(tab) = self.tabs.get(tab_idx) {
+                    if let Some(surf) = crate::app::commands::civil_surface::TinSurfaceData::from_document_entity(&tab.scene.document, handle) {
+                        self.surface_properties_state = Some(crate::ui::window::surface_properties::SurfacePropertiesState::from_surface(&surf));
+                        self.active_modal = Some(super::ModalKind::SurfaceProperties);
+                    }
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesTabChanged(tab) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.active_tab = tab;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesNameChanged(name) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.name = name;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesDescriptionChanged(desc) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.description = desc;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesStyleChanged(style) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.selected_style = style;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesMaterialChanged(mat) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.selected_material = mat;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesToggleLocked => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.object_locked = !state.object_locked;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesToggleTooltips => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.show_tooltips = !state.show_tooltips;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMinToggled(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_min_elev_enabled = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMinChanged(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_min_elev = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMaxToggled(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_max_elev_enabled = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMaxChanged(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_max_elev = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesMaxTriToggled(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.max_tri_length_enabled = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesMaxTriChanged(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.max_tri_length = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesApply => {
+                if let Some(state) = &self.surface_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let style_short = if state.selected_style.contains("Triangles Only") {
+                            "TRIANGLES"
+                        } else if state.selected_style.contains("Contours and Triangles") {
+                            "BOTH"
+                        } else if state.selected_style.contains("Border Only") {
+                            "BORDER"
+                        } else if state.selected_style.contains("_No Display") {
+                            "OFF"
+                        } else {
+                            "CONTOURS"
+                        };
+                        let _ = crate::app::commands::civil_surface::apply_surface_style(&mut tab.scene.document, state.handle, style_short);
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                    }
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesOk => {
+                if let Some(state) = &self.surface_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let style_short = if state.selected_style.contains("Triangles Only") {
+                            "TRIANGLES"
+                        } else if state.selected_style.contains("Contours and Triangles") {
+                            "BOTH"
+                        } else if state.selected_style.contains("Border Only") {
+                            "BORDER"
+                        } else if state.selected_style.contains("_No Display") {
+                            "OFF"
+                        } else {
+                            "CONTOURS"
+                        };
+                        let _ = crate::app::commands::civil_surface::apply_surface_style(&mut tab.scene.document, state.handle, style_short);
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                    }
+                }
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::SurfacePropertiesClose => {
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::SurfacePropertiesHelp => {
+                self.command_line.push_info("Surface Properties: Manage surface identity, Civil 3D styles, definition parameters, analysis bands, and geometric statistics.");
+                Task::none()
+            }
+            Message::SurfacePropertiesRebuild => {
+                if let Some(state) = &self.surface_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                    }
+                    self.command_line.push_output(&format!("✔ Rebuilt surface '{}' [{:X}].", state.name, state.handle.value()));
+                }
+                Task::none()
+            }
+            // ── Parcel Properties Dialog ──────────────────────────────────────────
+            Message::OpenParcelProperties(handle) => {
+                let tab_idx = self.active_tab;
+                if let Some(tab) = self.tabs.get(tab_idx) {
+                    if let Some(parcel) = crate::app::commands::civil_parcel::ParcelData::from_document_entity(&tab.scene.document, handle) {
+                        self.parcel_properties_state = Some(crate::ui::window::parcel_properties::ParcelPropertiesState::from_parcel(&parcel));
+                        self.active_modal = Some(super::ModalKind::ParcelProperties);
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesTabChanged(tab) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.active_tab = tab;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesNameChanged(name) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.name = name;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesNumberChanged(num_str) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    if let Ok(num) = num_str.parse::<u32>() {
+                        state.number = num;
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesSiteChanged(site) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.site = site;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesDescriptionChanged(desc) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.description = desc;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesStyleChanged(style) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.selected_style = style;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesZoningChanged(zoning) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.zoning = zoning.clone();
+                    state.thematic_color = if zoning.contains("Commercial") {
+                        iced::Color::from_rgb(0.90, 0.35, 0.25)
+                    } else if zoning.contains("Civic") {
+                        iced::Color::from_rgb(0.20, 0.60, 0.90)
+                    } else if zoning.contains("Park") {
+                        iced::Color::from_rgb(0.30, 0.75, 0.35)
+                    } else {
+                        iced::Color::from_rgb(0.92, 0.72, 0.20)
+                    };
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesOwnerChanged(owner) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.owner = owner;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesDeedChanged(deed) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.deed_no = deed;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesTaxIdChanged(tax) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.tax_id = tax;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesAddressChanged(addr) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.address = addr;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesAssessmentChanged(val) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.assessment_val = val;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesLandUseChanged(lu) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.land_use = lu;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesHatchChanged(hatch) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.hatch_pattern = hatch;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesToggleLocked => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.object_locked = !state.object_locked;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesToggleTooltips => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.show_tooltips = !state.show_tooltips;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesApply => {
+                if let Some(state) = &self.parcel_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let old_name = crate::app::commands::civil_parcel::ParcelData::from_document_entity(&tab.scene.document, state.handle)
+                            .map(|p| p.name);
+
+                        crate::app::commands::civil_parcel::ParcelData::update_entity_xdata(
+                            &mut tab.scene.document,
+                            state.handle,
+                            &state.name,
+                            state.number,
+                            &state.site,
+                            &state.zoning,
+                            &state.owner,
+                            &state.deed_no,
+                            &state.tax_id,
+                            &state.selected_layer,
+                        );
+
+                        let sync_count = crate::app::commands::civil_parcel::ParcelData::sync_dynamic_parcels(
+                            &mut tab.scene.document,
+                            Some(state.handle),
+                            old_name.as_deref(),
+                        );
+
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                        self.command_line.push_output(&format!("✔ Applied parcel properties to '{}' [{:X}] ({} dynamic label/table item(s) synchronized).", state.name, state.handle.value(), sync_count));
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesOk => {
+                if let Some(state) = &self.parcel_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let old_name = crate::app::commands::civil_parcel::ParcelData::from_document_entity(&tab.scene.document, state.handle)
+                            .map(|p| p.name);
+
+                        crate::app::commands::civil_parcel::ParcelData::update_entity_xdata(
+                            &mut tab.scene.document,
+                            state.handle,
+                            &state.name,
+                            state.number,
+                            &state.site,
+                            &state.zoning,
+                            &state.owner,
+                            &state.deed_no,
+                            &state.tax_id,
+                            &state.selected_layer,
+                        );
+
+                        let sync_count = crate::app::commands::civil_parcel::ParcelData::sync_dynamic_parcels(
+                            &mut tab.scene.document,
+                            Some(state.handle),
+                            old_name.as_deref(),
+                        );
+
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                        self.command_line.push_output(&format!("✔ Committed parcel properties for '{}' [{:X}] ({} dynamic label/table item(s) synchronized).", state.name, state.handle.value(), sync_count));
+                    }
+                }
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ParcelPropertiesClose => {
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ParcelPropertiesHelp => {
+                self.command_line.push_info("Parcel Properties: Manage cadastral identity, Civil 3D styles, legal ownership, mapcheck closure analysis, and geometric statistics.");
+                Task::none()
+            }
+            // ── Parcel Layout Tools Dialog ────────────────────────────────────────
+            Message::OpenParcelLayoutTools => {
+                if self.parcel_layout_state.is_none() {
+                    self.parcel_layout_state = Some(crate::ui::window::parcel_layout_tools::ParcelLayoutToolsState::default());
+                }
+                self.active_modal = Some(super::ModalKind::ParcelLayoutTools);
+                Task::none()
+            }
+            Message::ParcelLayoutMinAreaChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_area = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMinFrontageChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_frontage = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutUseOffsetToggled(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.use_offset = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutOffsetChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.frontage_offset = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMinWidthChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_width = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMinDepthChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_depth = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutUseMaxDepthToggled(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.use_max_depth = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMaxDepthChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.max_depth = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutPreferenceChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.solution_preference = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutAutoModeToggled(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.automatic_mode = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutRemainderChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.remainder_mode = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutAction(action) => {
+                let (cmd, msg) = match action.as_str() {
+                    "create" => ("PC_CREATE", "Running Create Lot by Polyline / Boundary..."),
+                    "slide" => ("PC_SLIDE_LINE", "Entering Interactive Slide Line lot sizing mode..."),
+                    "swing" => ("PC_SWING_LINE", "Entering Interactive Swing Line lot sizing mode..."),
+                    "split" => ("PC_SPLIT", "Entering Split Parcel by Cutting Line mode..."),
+                    "subdivide" => ("PC_SUBDIVIDE", "Executing Automatic Parcel Subdivision..."),
+                    "merge" => ("PC_MERGE", "Executing Parcel Union & Merge..."),
+                    "setback" => ("PC_SETBACK", "Setting Parcel Setback Offset..."),
+                    "thematic" => ("PC_THEMATIC", "Applying Thematic Zoning Hatching & Colors..."),
+                    _ => ("", "Action executed."),
+                };
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.active_tool = action.clone();
+                    st.status_message = msg.to_string();
+                }
+                self.command_line.push_info(msg);
+                if !cmd.is_empty() {
+                    return self.update(Message::Command(cmd.to_string()));
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutApply => {
+                if let Some(st) = &self.parcel_layout_state {
+                    self.command_line.push_output(&format!(
+                        "✔ Applied Parcel Sizing Criteria: Min Area={:.1}m², Min Frontage={:.1}m, Offset={:.1}m, Min Depth={:.1}m",
+                        st.min_area.parse::<f64>().unwrap_or(350.0),
+                        st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                        st.frontage_offset.parse::<f64>().unwrap_or(4.0),
+                        st.min_depth.parse::<f64>().unwrap_or(20.0),
+                    ));
+                    self.sync_dynamic_parcels_on_change(self.active_tab, None);
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutClose => {
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ParcelLayoutHelp => {
+                self.command_line.push_info("Parcel Layout Tools: Interactive Civil 3D lot subdivision, parametric sizing, slide/swing line modes, setbacks, and automated layout.");
                 Task::none()
             }
             Message::AutoConstrainSelectRow(index) => {
@@ -6748,15 +6413,9 @@ impl OpenCADStudio {
                     self.ribbon.close_dropdown();
                     return Task::none();
                 }
-                // Save As is a secondary operation; the save face keeps BSAVE.
-                let face = if dropdown_id == "BLOCK_SAVE" {
-                    "BSAVE"
-                } else {
-                    cmd
-                };
-                self.ribbon.select_dropdown_item(dropdown_id, face);
+                self.ribbon.select_dropdown_item(dropdown_id, cmd);
                 self.ribbon.activate_tool(cmd);
-                self.dispatch_ribbon_command(cmd)
+                self.dispatch_command(cmd)
             }
 
             Message::DeleteSelected => {
@@ -7113,31 +6772,6 @@ impl OpenCADStudio {
                 }
             }
 
-            Message::PasteSpecial(text) => {
-                let i = self.active_tab;
-                let waiting = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .is_some_and(|command| command.name() == "PASTESPEC");
-                if !waiting {
-                    return Task::none();
-                }
-                match text.filter(|text| !text.trim().is_empty()) {
-                    Some(text) => {
-                        // Same prompt, one more option: swap without echoing it.
-                        self.tabs[i].active_cmd = Some(self.paste_special_command(i, Some(&text)));
-                        self.push_ucs_to_cmd(i);
-                        Task::none()
-                    }
-                    // Nothing but maybe an image: paste it as one.
-                    None if self.clipboard.is_empty() => {
-                        self.tabs[i].active_cmd = None;
-                        self.read_system_clipboard_image()
-                    }
-                    None => Task::none(),
-                }
-            }
-
             Message::SystemClipboardPaste(result) => {
                 use super::SystemClipboardText as Text;
 
@@ -7150,11 +6784,9 @@ impl OpenCADStudio {
                         self.focus_cmd_input()
                     }
                     Text::EmptyOrUnsupported => {
-                        // No text — the clipboard may still hold an IMAGE (a
-                        // pasted screenshot). Read it and attach it the way the
-                        // IMAGE command's pick does; only when that also finds
-                        // nothing does the unsupported-content error surface.
-                        self.read_system_clipboard_image()
+                        self.command_line
+                            .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
+                        Task::none()
                     }
                     Text::Unavailable => {
                         self.command_line
@@ -7174,29 +6806,14 @@ impl OpenCADStudio {
                 }
             }
 
-            // The clipboard-image fallback of a text-less paste either
-            // attaches the image or falls back to the same error the text
-            // path reports when nothing readable was on the clipboard.
-            Message::SystemClipboardPasteImage(image) => match image {
-                Some((name, bytes)) => self.paste_clipboard_image(name, bytes),
-                None => {
-                    self.command_line
-                        .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
-                    Task::none()
-                }
-            },
-
             Message::SelectAllShortcut => {
                 let i = self.active_tab;
                 if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
                     // Ctrl+A in the MText editor selects all of its text.
                     self.mtext_select_all();
                     Task::none()
-                } else if self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
-                    && self.tabs[i].layers.selected.is_some()
-                {
-                    // Select every row in the Layer Manager (#236) while the
-                    // user is working in it (a layer row is selected).
+                } else if self.active_modal == Some(super::ModalKind::Layers) {
+                    // Select every row in the Layer Manager (#236).
                     let n = self.tabs[i].layers.layers.len();
                     self.tabs[i].layers.selected_multi = (0..n).collect();
                     self.tabs[i].layers.selected = (n > 0).then_some(0);
@@ -7337,7 +6954,14 @@ impl OpenCADStudio {
                     if matches!(scope, crate::app::QSelectScope::CurrentSelection) {
                         state.append = false;
                     }
-                    state.normalize_operator();
+                    if matches!(
+                        state.operator,
+                        crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
+                    ) && !state.property.as_ref().is_some_and(|property| {
+                        matches!(property.editor, crate::app::QSelectValueEditor::Number)
+                    }) {
+                        state.operator = crate::app::QSelectOp::Eq;
+                    }
                 }
                 Task::none()
             }
@@ -7361,7 +6985,14 @@ impl OpenCADStudio {
                     state.property = kept_property;
                     state.value.clear();
                     state.error = None;
-                    state.normalize_operator();
+                    if matches!(
+                        state.operator,
+                        crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
+                    ) && !state.property.as_ref().is_some_and(|property| {
+                        matches!(property.editor, crate::app::QSelectValueEditor::Number)
+                    }) {
+                        state.operator = crate::app::QSelectOp::Eq;
+                    }
                 }
                 Task::none()
             }
@@ -7371,7 +7002,14 @@ impl OpenCADStudio {
                     state.property = p;
                     state.value.clear();
                     state.error = None;
-                    state.normalize_operator();
+                    if matches!(
+                        state.operator,
+                        crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
+                    ) && !state.property.as_ref().is_some_and(|property| {
+                        matches!(property.editor, crate::app::QSelectValueEditor::Number)
+                    }) {
+                        state.operator = crate::app::QSelectOp::Eq;
+                    }
                 }
                 Task::none()
             }
@@ -7410,96 +7048,47 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::QSelectPickObject => self.on_qselect_pick_object(),
-            Message::QSelectAddCondition => {
-                if let Some(state) = self.qselect.as_mut() {
-                    let condition = state.draft_condition();
-                    if let Some(error) = condition.validation_error() {
-                        state.error = Some(error);
-                        return Task::none();
-                    }
-                    if let Some(index) = state.editing_condition.take() {
-                        if let Some(existing) = state.conditions.get_mut(index) {
-                            *existing = condition;
-                        }
-                    } else {
-                        state.conditions.push(condition);
-                    }
-                    state.error = None;
-                }
-                Task::none()
-            }
-            Message::QSelectEditCondition(index) => {
-                let condition = self
-                    .qselect
-                    .as_ref()
-                    .and_then(|state| state.conditions.get(index).cloned());
-                if let Some(condition) = condition {
-                    let scope = self.qselect.as_ref().unwrap().scope;
-                    let properties = self.tabs[self.active_tab]
-                        .scene
-                        .qselect_properties(condition.type_filter.as_deref(), scope);
-                    if let Some(state) = self.qselect.as_mut() {
-                        state.available_properties = properties;
-                        state.type_filter = condition.type_filter;
-                        state.property = condition.property;
-                        state.operator = condition.operator;
-                        state.value = condition.value;
-                        state.editing_condition = Some(index);
-                        state.error = None;
-                    }
-                }
-                Task::none()
-            }
-            Message::QSelectRemoveCondition(index) => {
-                if let Some(state) = self.qselect.as_mut() {
-                    if index < state.conditions.len() {
-                        state.conditions.remove(index);
-                        state.editing_condition = match state.editing_condition {
-                            Some(editing) if editing == index => None,
-                            Some(editing) if editing > index => Some(editing - 1),
-                            other => other,
-                        };
-                    }
-                    state.error = None;
-                }
-                Task::none()
-            }
-            Message::QSelectClearConditions => {
-                if let Some(state) = self.qselect.as_mut() {
-                    state.conditions.clear();
-                    state.editing_condition = None;
-                    state.error = None;
-                }
-                Task::none()
-            }
-            Message::QSelectCancelEdit => {
-                if let Some(state) = self.qselect.as_mut() {
-                    state.editing_condition = None;
-                    state.error = None;
-                }
-                Task::none()
-            }
             Message::QSelectApply => {
                 let validation_error = self.qselect.as_ref().and_then(|state| {
-                    if self.tabs[self.active_tab]
+                    let candidate_count = self.tabs[self.active_tab]
                         .scene
-                        .qselect_candidate_count(state.scope)
-                        == 0
-                    {
+                        .qselect_candidate_count(state.scope);
+                    if candidate_count == 0 {
                         Some(crate::t!("No objects are available in this scope.").into_owned())
-                    } else if state.editing_condition.is_some() {
-                        Some(
-                            crate::t!("Update or cancel the condition edit before applying.")
-                                .into_owned(),
-                        )
-                    } else if state.conditions.is_empty() {
-                        state.draft_condition().validation_error()
+                    } else if let Some(property) = state.property.as_ref() {
+                        if matches!(state.operator, crate::app::QSelectOp::Any) {
+                            None
+                        } else if matches!(
+                            state.operator,
+                            crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
+                        ) && !matches!(
+                            property.editor,
+                            crate::app::QSelectValueEditor::Number
+                        ) {
+                            Some(
+                                crate::t!("This operator requires a numeric property.")
+                                    .into_owned(),
+                            )
+                        } else {
+                            match &property.editor {
+                                crate::app::QSelectValueEditor::Number
+                                    if crate::entities::common::parse_f64(&state.value)
+                                        .is_none() =>
+                                {
+                                    Some(crate::t!("Enter a valid number.").into_owned())
+                                }
+                                crate::app::QSelectValueEditor::Choice(_)
+                                    if state.value.is_empty() =>
+                                {
+                                    Some(crate::t!("Choose a value.").into_owned())
+                                }
+                                crate::app::QSelectValueEditor::Text
+                                | crate::app::QSelectValueEditor::Number
+                                | crate::app::QSelectValueEditor::Choice(_) => None,
+                            }
+                        }
                     } else {
-                        state
-                            .conditions
-                            .iter()
-                            .find_map(|condition| condition.validation_error())
+                        None
                     }
                 });
                 if let Some(error) = validation_error {
@@ -7514,14 +7103,12 @@ impl OpenCADStudio {
                 self.qselect_settings = Some((&state).into());
                 self.reset_modal_geometry();
                 let i = self.active_tab;
-                let conditions = if state.conditions.is_empty() {
-                    vec![state.draft_condition()]
-                } else {
-                    state.conditions.clone()
-                };
-                let matched = self.tabs[i].scene.qselect_conditions(
+                let matched = self.tabs[i].scene.qselect(
                     state.scope,
-                    &conditions,
+                    state.type_filter.as_deref(),
+                    state.property.as_ref().map(|p| p.field.as_str()),
+                    state.operator,
+                    &state.value,
                     state.mode,
                     state.append && matches!(state.scope, crate::app::QSelectScope::CurrentSpace),
                 );
@@ -7537,7 +7124,6 @@ impl OpenCADStudio {
                         .collect();
                     block_def.error_message = None;
                     self.active_modal = Some(super::ModalKind::BlockDefinition);
-                    self.refresh_block_definition_preview();
                 } else if let Some(ref mut wblock) = self.wblock {
                     wblock.selected_handles = self.tabs[i]
                         .scene
@@ -7547,11 +7133,6 @@ impl OpenCADStudio {
                         .collect();
                     wblock.error_message = None;
                     self.active_modal = Some(super::ModalKind::WriteBlock);
-                } else {
-                    // FILTER may be opened from a still-focused command input.
-                    // Release text focus so Delete and clipboard shortcuts act
-                    // on the resulting pick-first selection, not on that input.
-                    return self.unfocus_widgets();
                 }
                 Task::none()
             }
@@ -7571,7 +7152,31 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::RibbonLinetypeChanged(lt) => self.on_ribbon_linetype_changed(lt),
-            Message::RibbonLineweightChanged(lw) => self.on_ribbon_lineweight_changed(lw),
+            Message::RibbonLineweightChanged(lw) => {
+                let i = self.active_tab;
+                self.ribbon.close_dropdown();
+                let handles = self.property_target_handles(i);
+                if handles.is_empty() {
+                    if self.has_property_selection(i) {
+                        return Task::none();
+                    }
+                    // Persist into the tab's header (CELWEIGHT). #21.
+                    self.tabs[i].scene.document.header.current_line_weight = lw.value();
+                    self.tabs[i].dirty = true;
+                    self.ribbon.active_lineweight = lw;
+                } else {
+                    // Lineweight is baked into the cached wire geometry —
+                    // re-tessellate so the change shows immediately (issue #231
+                    // class).
+                    self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                        if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                            crate::scene::view::dispatch::apply_line_weight(entity, lw);
+                        }
+                    });
+                    self.ribbon.active_lineweight = lw;
+                }
+                Task::none()
+            }
 
             Message::RibbonStyleChanged { key, name } => self.on_ribbon_style_changed(key, name),
 
@@ -7591,7 +7196,22 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::PropColorChanged(color) => self.set_property_color(color, None),
+            Message::PropColorChanged(color) => {
+                let i = self.active_tab;
+                let handles = self.property_target_handles(i);
+                if handles.is_empty() {
+                    let task = self.on_ribbon_color_changed(color);
+                    self.refresh_properties();
+                    return task;
+                }
+                self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                    if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                        crate::scene::view::dispatch::apply_color(entity, color);
+                    }
+                });
+                self.tabs[i].properties.color_picker_open = false;
+                Task::none()
+            }
 
             Message::PropLwChanged(lw) => {
                 let i = self.active_tab;
@@ -7967,40 +7587,13 @@ impl OpenCADStudio {
             Message::PropAttrCommit(tag) => self.on_prop_attr_commit(tag),
 
             Message::PropPointerPressed => {
-                let mut rename_blur = if self.tabs[self.active_tab].layers.editing.is_some() {
-                    crate::ui::properties::focused_widget_task(Message::LayerRenameFocus)
-                } else {
-                    Task::none()
-                };
-                if self.style_rename.is_some() {
-                    rename_blur = Task::batch([
-                        rename_blur,
-                        crate::ui::properties::focused_widget_task(Message::StyleRenameFocus),
-                    ]);
+                if !self.dock_panel_visible(crate::ui::dock::PanelId::Properties) {
+                    return Task::none();
                 }
-                if !self.dock_panel_visible(crate::ui::dock::PanelId::Properties)
-                    && !self.dock_panel_visible(crate::ui::dock::PanelId::GraphicAttributes)
-                {
-                    return rename_blur;
-                }
-                Task::batch([crate::ui::properties::sync_active_field_task(), rename_blur])
+                crate::ui::properties::sync_active_field_task()
             }
 
             Message::PropSyncActive(focused) => {
-                // The Graphic Attributes linetype scale field behaves like a
-                // Properties field: the first click selects its value.
-                let scale_field = iced::widget::Id::new(
-                    crate::ui::window::graphic_attributes::LINETYPE_SCALE_FIELD,
-                );
-                if focused.as_ref() == Some(&scale_field) {
-                    if !std::mem::replace(&mut self.graphic_attributes.linetype_scale_focused, true)
-                    {
-                        return iced::widget::operation::select_all(scale_field);
-                    }
-                    return Task::none();
-                }
-                self.graphic_attributes.linetype_scale_focused = false;
-                self.graphic_attributes.linetype_scale_input = None;
                 let panel = &mut self.tabs[self.active_tab].properties;
                 if let Some(id) = focused.as_ref() {
                     if let Some(key) = panel.prop_field_key_for_id(id) {
@@ -8023,13 +7616,6 @@ impl OpenCADStudio {
                     panel.active_field = None;
                 }
                 Task::none()
-            }
-
-            Message::PropPickerSurface(quick, message) => {
-                let task = self.update(*message);
-                let i = self.active_tab;
-                self.tabs[i].properties.picker_in_quick = quick;
-                task
             }
 
             Message::PropColorPickerToggle => {
@@ -8274,7 +7860,6 @@ impl OpenCADStudio {
                                     codec::entities::hatch::GradientColorEntry {
                                         value,
                                         color: codec::types::Color::Index(7),
-                                        ..Default::default()
                                     },
                                 );
                             }
@@ -8339,18 +7924,6 @@ impl OpenCADStudio {
             }
 
             Message::LayoutCreate => self.on_layout_create(),
-
-            Message::LayoutCopy(name) => self.on_layout_copy(name),
-
-            Message::LayoutPageSetup(name) => {
-                let switch_task = self.on_layout_switch(name);
-                Task::batch([switch_task, self.on_plot_dialog_open()])
-            }
-
-            Message::LayoutPlot(name) => {
-                let switch_task = self.on_layout_switch(name);
-                Task::batch([switch_task, Task::done(Message::Command("PLOT".into()))])
-            }
 
             Message::LayoutDelete(name) => {
                 let i = self.active_tab;
@@ -8728,7 +8301,6 @@ impl OpenCADStudio {
                     .collect();
                 rows.sort_by(|a, b| a.0.cmp(&b.0));
                 self.alias_editor_rows = rows;
-                self.alias_import_report.clear();
                 self.alias_pending_add = false;
                 self.alias_reset_confirm = false;
                 self.alias_close_confirm = false;
@@ -8748,34 +8320,6 @@ impl OpenCADStudio {
                 }
                 // Typing never finishes the addition — only the draft row's
                 // check button does, so no half-visible "ghost" row appears.
-                Task::none()
-            }
-            Message::AliasEditorImport => Task::perform(
-                async {
-                    let handle = rfd::AsyncFileDialog::new()
-                        .add_filter(crate::t!("Command aliases (*.pgp)").as_ref(), &["pgp"])
-                        .pick_file()
-                        .await?;
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        Some(std::fs::read(handle.path()).map_err(|e| e.to_string()))
-                    }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        Some(Ok(handle.read().await))
-                    }
-                },
-                Message::AliasEditorImported,
-            ),
-            Message::AliasEditorImported(result) => {
-                // A picker can finish after the modal was dismissed.
-                if self.active_modal == Some(super::ModalKind::Aliases) {
-                    match result {
-                        Some(Ok(bytes)) => self.import_alias_pgp(&bytes),
-                        Some(Err(error)) => self.command_line.push_error(&format!("PGP: {error}")),
-                        None => {}
-                    }
-                }
                 Task::none()
             }
             Message::AliasEditorAdd => {
@@ -9144,6 +8688,39 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::BgPickerOpen(target) => {
+                self.bg_picker = Some(target);
+                Task::none()
+            }
+
+            Message::BgPickerCancel => {
+                self.bg_picker = None;
+                Task::none()
+            }
+
+            Message::BgPickerSubmit(color) => {
+                // Hand the result to the same handler the typed hex field
+                // uses, so the wheel and the field cannot drift apart on
+                // validation, persistence or the MatchTheme fallback.
+                let hex = crate::app::config::rgb_to_hex([
+                    (color.r * 255.0).round() as u8,
+                    (color.g * 255.0).round() as u8,
+                    (color.b * 255.0).round() as u8,
+                ]);
+                match self.bg_picker.take() {
+                    Some(crate::app::BgTarget::Model) => {
+                        Task::done(Message::ModelSpaceBgChanged(hex))
+                    }
+                    Some(crate::app::BgTarget::Paper) => {
+                        Task::done(Message::PaperSpaceBgChanged(hex))
+                    }
+                    Some(crate::app::BgTarget::Desk) => {
+                        Task::done(Message::DeskSpaceBgChanged(hex))
+                    }
+                    None => Task::none(),
+                }
+            }
+
             Message::ModelSpaceBgChanged(hex) => {
                 self.model_bg_input = hex.clone();
                 if hex.trim().is_empty() {
@@ -9230,29 +8807,9 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::SelectionHighlightOpacityChanged(opacity) => {
-                self.model_space.selection_highlight_opacity = opacity.clamp(10, 100);
-                self.sync_model_space_theme(false);
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::SelectionHighlightWidenChanged(widen) => {
-                self.model_space.selection_highlight_widen = widen.min(6);
-                self.sync_model_space_theme(false);
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
             Message::GripSizeChanged(size) => {
                 self.model_space.grip_size = size.clamp(1, 25);
                 self.sync_model_space_theme(false);
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::SnapMarkerSizeChanged(size) => {
-                self.model_space.snap_marker_size = size.clamp(1, 20);
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -9362,12 +8919,6 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::CommandLineOpacityChanged(percent) => {
-                self.command_line.set_opacity_percent(percent);
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
             Message::CommandLineFadeChanged(ms) => {
                 let ms = crate::app::settings::clamp_commandline_fade_ms(ms);
                 self.commandline_fade_ms = ms;
@@ -9378,42 +8929,6 @@ impl OpenCADStudio {
 
             Message::ZoomWheelReversedChanged(reversed) => {
                 self.zoom_wheel_reversed = reversed;
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::ToggleDynamicUcs => {
-                self.dynamic_ucs = !self.dynamic_ucs;
-                self.command_line.push_output(if self.dynamic_ucs {
-                    crate::t!("Dynamic UCS: on")
-                } else {
-                    crate::t!("Dynamic UCS: off")
-                }
-                .as_ref());
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::NavigationStyleChanged(style) => {
-                self.navigation_style = style;
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::MenuBarChanged(shown) => {
-                self.show_menu_bar = shown;
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::RibbonVisibleChanged(shown) => {
-                self.ribbon_closed = !shown;
-                self.persist_settings_if_changed();
-                Task::none()
-            }
-
-            Message::HatchAssociativeChanged(associative) => {
-                self.hatch_associative = associative;
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -9601,34 +9116,6 @@ impl OpenCADStudio {
                 crate::sys::open_url(&path, None)
             }
 
-            #[cfg(target_arch = "wasm32")]
-            Message::ChooseFolder(_) | Message::FolderChosen(..) => Task::none(),
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::ChooseFolder(folder) => Task::perform(
-                async {
-                    rfd::AsyncFileDialog::new()
-                        .pick_folder()
-                        .await
-                        .map(|handle| crate::sys::handle_path(&handle))
-                },
-                move |picked| match picked {
-                    Some(path) => Message::FolderChosen(folder, Some(path)),
-                    None => Message::Noop,
-                },
-            ),
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::FolderChosen(folder, path) => {
-                use crate::ui::window::options::MovableFolder;
-                match folder {
-                    MovableFolder::Fonts => crate::io::font_repo::set_fonts_folder(path),
-                    MovableFolder::PlotStyles => {
-                        crate::io::plot_style::set_plot_styles_folder(path)
-                    }
-                }
-                self.save_config();
-                Task::none()
-            }
-
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;
                 self.persist_settings_if_changed();
@@ -9736,12 +9223,6 @@ impl OpenCADStudio {
             }
 
             Message::CloseModal => {
-                if self.active_modal == Some(super::ModalKind::BlockLookup) {
-                    self.block_lookup = None;
-                }
-                if self.active_modal == Some(super::ModalKind::BlockVisibility) {
-                    self.block_visibility = None;
-                }
                 // The Invalid Area dialog's ✕ undoes the boundary change, as its Cancel does.
                 if self.active_modal == Some(super::ModalKind::CountInvalidArea) {
                     return self.update(Message::Count(
@@ -9752,26 +9233,9 @@ impl OpenCADStudio {
                     self.close_sheet_set_dialog();
                     return Task::none();
                 }
-                // The Background dialog returns to -VIEW's settings prompt.
-                if self.active_modal == Some(super::ModalKind::ViewBackground) {
-                    self.view_background = None;
-                    self.close_active_modal();
-                    let i = self.active_tab;
-                    return self.run_dash_view("SETTINGS", i);
-                }
-                if self.active_modal == Some(super::ModalKind::ImageAdjust) {
-                    self.image_adjust = None;
-                }
                 if self.active_modal == Some(super::ModalKind::Field) {
                     self.close_field_dialog();
                     return Task::none();
-                }
-                // Closing the attribute manager is its Cancel: live changes
-                // are taken back.
-                if self.active_modal == Some(super::ModalKind::AttMan) {
-                    return self.on_attman(
-                        crate::ui::window::attman_dialog::AttManMsg::Cancel,
-                    );
                 }
                 if matches!(
                     self.active_modal,
@@ -9785,17 +9249,6 @@ impl OpenCADStudio {
                     } else {
                         Task::none()
                     };
-                }
-                if self.active_modal == Some(super::ModalKind::RefEdit) {
-                    self.refedit_dialog = None;
-                }
-                // Cancel returns to PDFSHXTEXT's selection prompt.
-                if self.active_modal == Some(super::ModalKind::PdfShxSettings) {
-                    self.pdf_shx_dialog = None;
-                    self.close_active_modal();
-                    let i = self.active_tab;
-                    self.start_pdf_shx_gather(i);
-                    return self.focus_cmd_input();
                 }
                 // Cancelling the section settings drops the waiting extraction.
                 if self.active_modal == Some(super::ModalKind::PcSection) {
@@ -9814,14 +9267,6 @@ impl OpenCADStudio {
                 // The Options window's × and Esc behave like its Close button.
                 if self.active_modal == Some(super::ModalKind::Options) {
                     return self.update(Message::OptionsClose);
-                }
-                // Closing the crash-recovery prompt (✕ or Escape) DEFERS:
-                // one stray keystroke must not delete the only recovery
-                // copy, so the snapshot survives and is re-offered on the
-                // next boot. Only the Discard button deletes.
-                #[cfg(target_arch = "wasm32")]
-                if self.active_modal == Some(super::ModalKind::AutosaveRestore) {
-                    return self.update(Message::WebAutosaveDefer);
                 }
                 // Closing the shortcut editor with un-applied rows needs an
                 // explicit discard; a second close attempt (or the overlay's
@@ -10149,16 +9594,17 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::LayerNameColGrab => {
-                // Start a Name-column divider drag; the dock's pointer capture
-                // feeds it (see `on_dock`).
-                self.dock_drag = Some(crate::ui::dock::DockDrag::LayerColumn);
-                self.dock_drag_last = None;
+                // Start a Name-column divider drag; rides ModalDragMove.
+                self.layer_col_dragging = true;
+                self.modal_drag_last = None;
                 Task::none()
             }
             Message::ModalDragMove(p) => {
                 if let Some(last) = self.modal_drag_last {
                     let (dx, dy) = (p.x - last.x, p.y - last.y);
-                    if self.modal_resizing {
+                    if self.layer_col_dragging {
+                        self.layer_name_col_w = (self.layer_name_col_w + dx).clamp(60.0, 640.0);
+                    } else if self.modal_resizing {
                         // The grip sits bottom-right, so dragging out grows the
                         // box. The delta is added to each dialog's natural size,
                         // so clamp it at zero — dragging in past the natural size
@@ -10192,7 +9638,7 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                if self.modal_dragging || self.modal_resizing {
+                if self.modal_dragging || self.modal_resizing || self.layer_col_dragging {
                     self.modal_drag_last = Some(p);
                 }
                 Task::none()
@@ -10200,6 +9646,7 @@ impl OpenCADStudio {
             Message::ModalDragRelease => {
                 self.modal_dragging = false;
                 self.modal_resizing = false;
+                self.layer_col_dragging = false;
                 self.modal_drag_last = None;
                 Task::none()
             }
@@ -10751,77 +10198,6 @@ impl OpenCADStudio {
             Message::UnsavedDialogDiscard => self.on_unsaved_dialog_discard(),
 
             Message::UnsavedDialogSave => self.on_unsaved_dialog_save(),
-            Message::BlockEditChangesSave => self.resolve_block_edit_close(true),
-            Message::BlockSaveAsName(name) => {
-                let i = self.active_tab;
-                let error = self.validate_block_save_as_name(i, &name).err();
-                if let Some(state) = self.block_save_as.as_mut() {
-                    state.name = name;
-                    state.error = error;
-                }
-                Task::none()
-            }
-            Message::BlockSaveAsApply => self.apply_block_save_as_dialog(),
-            Message::BlockVisibility(action) => self.handle_block_visibility(action),
-            Message::BlockLookup(action) => self.handle_block_lookup(action),
-            Message::BlockEditPickerName(name) => {
-                if let Some(state) = self.block_edit_picker.as_mut() {
-                    state.name = name.clone();
-                    let trimmed = name.trim();
-                    state.error = if trimmed.is_empty() {
-                        None
-                    } else {
-                        crate::scene::block_service::validate_block_name(trimmed)
-                            .err()
-                            .map(|e| e.to_string())
-                    };
-                    if let Some(tab_idx) = self.tabs.iter().position(|t| t.id == state.document_id)
-                    {
-                        if let Some(matched) = state
-                            .existing_names
-                            .iter()
-                            .find(|n| n.eq_ignore_ascii_case(trimmed))
-                        {
-                            state.preview = self.tabs[tab_idx].scene.block_preview_wires(matched);
-                            state.description = self.tabs[tab_idx]
-                                .scene
-                                .document
-                                .block_records
-                                .get(matched)
-                                .map(|b| b.description.clone())
-                                .unwrap_or_default();
-                        } else {
-                            state.preview.clear();
-                            state.description.clear();
-                        }
-                    }
-                }
-                Task::none()
-            }
-            Message::BlockEditPickerSelect(name) => {
-                if let Some(state) = self.block_edit_picker.as_mut() {
-                    state.name = name.clone();
-                    state.error = None;
-                    if let Some(tab_idx) = self.tabs.iter().position(|t| t.id == state.document_id)
-                    {
-                        state.preview = self.tabs[tab_idx].scene.block_preview_wires(&name);
-                        state.description = self.tabs[tab_idx]
-                            .scene
-                            .document
-                            .block_records
-                            .get(&name)
-                            .map(|b| b.description.clone())
-                            .unwrap_or_default();
-                    }
-                }
-                Task::none()
-            }
-            Message::BlockEditPickerApply => self.apply_bedit_dialog(),
-            Message::BlockEditChangesDiscard => self.resolve_block_edit_close(false),
-            Message::BlockEditChangesCancel => {
-                self.cancel_block_edit_close();
-                Task::none()
-            }
 
             Message::AecDropSameVersion => self.on_aec_drop_same_version(),
             Message::AecDropProceed => self.on_aec_drop_proceed(),
@@ -10851,74 +10227,6 @@ impl OpenCADStudio {
                 bounds,
                 screenshot,
             } => self.on_web_save_screenshot(tab_id, filename, ext, version, bounds, screenshot),
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WebSaveSerialized {
-                tab_id,
-                filename,
-                autosave_key,
-                version,
-                geometry_epoch,
-                edit_revision,
-                camera_generation,
-                result,
-            } => self.on_web_save_serialized(
-                tab_id,
-                filename,
-                autosave_key,
-                version,
-                geometry_epoch,
-                edit_revision,
-                camera_generation,
-                result,
-            ),
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WebSaveHandlePicked {
-                tab_id,
-                filename,
-                ext,
-                version,
-                picked,
-            } => self.on_web_save_handle_picked(tab_id, filename, ext, version, picked),
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WebSaveWritten {
-                tab_id,
-                filename,
-                autosave_key,
-                version,
-                geometry_epoch,
-                edit_revision,
-                camera_generation,
-                result,
-                bytes,
-            } => self.on_web_save_written(
-                tab_id,
-                filename,
-                autosave_key,
-                version,
-                geometry_epoch,
-                edit_revision,
-                camera_generation,
-                result,
-                bytes,
-            ),
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WebSaveallSerialized { skipped, results } => {
-                self.on_web_saveall_serialized(skipped, results)
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WebArchiveSerialized {
-                cmd,
-                zip_name,
-                filename,
-                deps,
-                skipped,
-                result,
-            } => self.on_web_archive_serialized(cmd, zip_name, filename, deps, skipped, result),
 
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFileInUseRetry => self.on_save_file_in_use_retry(),
@@ -11002,14 +10310,7 @@ impl OpenCADStudio {
             Message::PlotDialogOpen => self.on_plot_dialog_open(),
             Message::PlotDlg(m) => self.on_plot_dlg(m),
             Message::BlockPalette(m) => self.on_block_palette(m),
-            Message::GraphicAttributes(m) => self.on_graphic_attributes(m),
             Message::Dock(m) => self.on_dock(m),
-            Message::AuthoringPaletteTabSelected(tab) => {
-                if self.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes) {
-                    self.authoring_palette_tab = tab;
-                }
-                Task::none()
-            }
             Message::PrintAllOpen => self.on_print_all_open(),
             Message::PrintAllToggle(name) => {
                 if let Some((_, selected)) = self
@@ -11048,23 +10349,24 @@ impl OpenCADStudio {
                         return Task::done(Message::PrintAllPdfPath(None));
                     };
                     iced::window::run(window_id, move |parent| {
-                        crate::io::pdf_export::pick_plot_path_owned(stem, parent, false)
+                        crate::io::pdf_export::pick_pdf_path_owned(stem, parent)
                     })
                     .map(Message::PrintAllPdfPath)
                 }
                 #[cfg(target_os = "windows")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_plot_path_async(stem, false),
+                        crate::io::pdf_export::pick_pdf_path_async(stem),
                         Message::PrintAllPdfPath,
                     )
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    Task::perform(
-                        crate::io::pdf_export::pick_plot_path_owned(stem),
-                        Message::PrintAllPdfPath,
-                    )
+                    let _ = stem;
+                    self.command_line.push_error(
+                        crate::t!("PDF export is not available in the web version.").as_ref(),
+                    );
+                    Task::none()
                 }
             }
             Message::PrintAllPdfPath(None) => Task::none(),
@@ -11093,31 +10395,27 @@ impl OpenCADStudio {
                     .and_then(|p: &std::path::Path| p.file_stem())
                     .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "drawing".into());
-                // The save dialog follows the dialog's file device, so the
-                // SVG choice proposes `stem.svg` up front.
-                #[cfg(not(target_arch = "wasm32"))]
-                let svg = self.plot_dialog.file_svg;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
                 {
                     let Some(window_id) = self.main_window else {
                         return Task::done(Message::PlotExportPath(None));
                     };
                     iced::window::run(window_id, move |parent| {
-                        crate::io::pdf_export::pick_plot_path_owned(stem, parent, svg)
+                        crate::io::pdf_export::pick_pdf_path_owned(stem, parent)
                     })
                     .map(Message::PlotExportPath)
                 }
                 #[cfg(target_os = "windows")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_plot_path_async(stem, svg),
+                        crate::io::pdf_export::pick_pdf_path_async(stem),
                         Message::PlotExportPath,
                     )
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_plot_path_owned(stem),
+                        crate::io::pdf_export::pick_pdf_path_owned(stem),
                         Message::PlotExportPath,
                     )
                 }
@@ -11133,29 +10431,27 @@ impl OpenCADStudio {
                     .and_then(|p: &std::path::Path| p.file_stem())
                     .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "drawing".into());
-                #[cfg(not(target_arch = "wasm32"))]
-                let svg = self.plot_dialog.file_svg;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
                 {
                     let Some(window_id) = self.main_window else {
                         return Task::done(Message::PlotWindowExportPath(None));
                     };
                     iced::window::run(window_id, move |parent| {
-                        crate::io::pdf_export::pick_plot_path_owned(stem, parent, svg)
+                        crate::io::pdf_export::pick_pdf_path_owned(stem, parent)
                     })
                     .map(Message::PlotWindowExportPath)
                 }
                 #[cfg(target_os = "windows")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_plot_path_async(stem, svg),
+                        crate::io::pdf_export::pick_pdf_path_async(stem),
                         Message::PlotWindowExportPath,
                     )
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_plot_path_owned(stem),
+                        crate::io::pdf_export::pick_pdf_path_owned(stem),
                         Message::PlotWindowExportPath,
                     )
                 }
@@ -11503,8 +10799,14 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::TextStyleDialogNew => self.style_new(crate::app::StyleKind::Text),
-            Message::TextStyleDialogCopy => self.style_copy(crate::app::StyleKind::Text),
+            Message::TextStyleDialogNew => {
+                self.style_new(crate::app::StyleKind::Text);
+                Task::none()
+            }
+            Message::TextStyleDialogCopy => {
+                self.style_copy(crate::app::StyleKind::Text);
+                Task::none()
+            }
             Message::TextStyleDialogDelete => {
                 self.style_delete(crate::app::StyleKind::Text);
                 Task::none()
@@ -11522,18 +10824,6 @@ impl OpenCADStudio {
             }
             Message::StyleRenameCommit(kind) => {
                 self.style_rename_commit(kind);
-                Task::none()
-            }
-            Message::StyleRenameFocus(focused) => {
-                let typed = self
-                    .style_rename
-                    .as_ref()
-                    .is_some_and(|name| *name != self.style_rename_buf);
-                if typed && focused != Some(crate::ui::style::style_list::rename_input_id()) {
-                    if let Some(kind) = self.style_rename_kind {
-                        self.style_rename_commit(kind);
-                    }
-                }
                 Task::none()
             }
             Message::StyleRenameCancel => {
@@ -11808,8 +11098,14 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::TableStyleDialogNew => self.style_new(crate::app::StyleKind::Table),
-            Message::TableStyleDialogCopy => self.style_copy(crate::app::StyleKind::Table),
+            Message::TableStyleDialogNew => {
+                self.style_new(crate::app::StyleKind::Table);
+                Task::none()
+            }
+            Message::TableStyleDialogCopy => {
+                self.style_copy(crate::app::StyleKind::Table);
+                Task::none()
+            }
             Message::TableStyleDialogDelete => {
                 self.style_delete(crate::app::StyleKind::Table);
                 Task::none()
@@ -11875,8 +11171,14 @@ impl OpenCADStudio {
                 self.style_stage_commit();
                 Task::none()
             }
-            Message::MlStyleDialogNew => self.style_new(crate::app::StyleKind::MLine),
-            Message::MlStyleDialogCopy => self.style_copy(crate::app::StyleKind::MLine),
+            Message::MlStyleDialogNew => {
+                self.style_new(crate::app::StyleKind::MLine);
+                Task::none()
+            }
+            Message::MlStyleDialogCopy => {
+                self.style_copy(crate::app::StyleKind::MLine);
+                Task::none()
+            }
             Message::MlStyleDialogDelete => {
                 self.style_delete(crate::app::StyleKind::MLine);
                 Task::none()
@@ -11974,8 +11276,14 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MLeaderStyleDialogSetCurrent => self.on_mleader_style_dialog_set_current(),
-            Message::MLeaderStyleDialogNew => self.style_new(crate::app::StyleKind::MLeader),
-            Message::MLeaderStyleDialogCopy => self.style_copy(crate::app::StyleKind::MLeader),
+            Message::MLeaderStyleDialogNew => {
+                self.style_new(crate::app::StyleKind::MLeader);
+                Task::none()
+            }
+            Message::MLeaderStyleDialogCopy => {
+                self.style_copy(crate::app::StyleKind::MLeader);
+                Task::none()
+            }
             Message::MLeaderStyleDialogDelete => {
                 self.style_delete(crate::app::StyleKind::MLeader);
                 Task::none()
@@ -12050,8 +11358,14 @@ impl OpenCADStudio {
                 self.dimstyle_compare = name;
                 Task::none()
             }
-            Message::DimStyleDialogNew => self.style_new(crate::app::StyleKind::Dim),
-            Message::DimStyleDialogCopy => self.style_copy(crate::app::StyleKind::Dim),
+            Message::DimStyleDialogNew => {
+                self.style_new(crate::app::StyleKind::Dim);
+                Task::none()
+            }
+            Message::DimStyleDialogCopy => {
+                self.style_copy(crate::app::StyleKind::Dim);
+                Task::none()
+            }
             Message::DimStyleDialogSetCurrent => {
                 // Staged: persists on Apply.
                 let i = self.active_tab;
@@ -12154,28 +11468,10 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::OpenColorWindow(target, color) => {
-                if matches!(
-                    target,
-                    crate::app::ColorPickTarget::GraphicAttributesLine
-                        | crate::app::ColorPickTarget::GraphicAttributesSolid
-                ) {
-                    self.graphic_attributes.open_menu = None;
-                }
-                let (current, varies, name) = self.color_picker_current(&target, color);
-                let mut picker = crate::ui::color_select::ColorPicker::new(target, current, varies);
-                if !matches!(picker.target, crate::app::ColorPickTarget::Interface(_)) {
-                    self.read_color_books();
-                    let by_layer = self.color_picker_layer_color(&picker.target);
-                    let tab = &self.tabs[self.active_tab];
-                    picker = picker.with_drawing(
-                        crate::ui::color_select::document::collect(&tab.scene.document),
-                        &tab.recent_colors,
-                        std::sync::Arc::clone(&self.color_books),
-                        name,
-                        by_layer,
-                    );
-                }
-                self.color_picker = Some(picker);
+                self.color_pick_target = Some((target, color));
+
+                // Always open the shared CAD colour picker on the indexed ACI page.
+                self.color_picker_tab = crate::app::ColorPickerTab::Index;
                 self.modal_offset = iced::Vector::ZERO;
                 self.ds_color_open = None;
                 self.mls_color_open = None;
@@ -12190,224 +11486,27 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::ColorPicker(msg) => {
-                let Some(picker) = self.color_picker.as_mut() else {
-                    return Task::none();
-                };
-                match picker.update(msg) {
-                    Some(crate::ui::color_select::Outcome::Commit(color, name)) => {
-                        self.update(Message::ColorWindowPick(color, name))
-                    }
-                    Some(crate::ui::color_select::Outcome::LoadBook) => Task::perform(
-                        crate::ui::color_select::book::load_from_dialog(),
-                        Message::ColorBookLoaded,
-                    ),
-                    Some(crate::ui::color_select::Outcome::Cancel) => {
-                        self.color_picker = None;
-                        Task::none()
-                    }
-                    Some(crate::ui::color_select::Outcome::Screenshot) => {
-                        use crate::ui::color_select::{eyedropper::EyedropperMsg, ColorPickerMsg};
-                        match self.main_window {
-                            Some(id) => iced::window::screenshot(id).map(|shot| {
-                                Message::ColorPicker(ColorPickerMsg::Eyedropper(
-                                    EyedropperMsg::Shot(shot),
-                                ))
-                            }),
-                            // Nothing to capture: leave the eyedropper instead
-                            // of waiting for a screenshot that never comes.
-                            None => self.update(Message::ColorPicker(ColorPickerMsg::Cancel)),
-                        }
-                    }
-                    None => Task::none(),
+            Message::ColorPickerTabChanged(tab) => {
+                self.color_picker_tab = tab;
+                Task::none()
+            }
+            Message::ColorPickerColorChanged(color) => {
+                if let Some((_, current)) = self.color_pick_target.as_mut() {
+                    *current = color;
                 }
+                Task::none()
             }
             Message::CloseColorPicker => {
-                self.color_picker = None;
+                self.color_pick_target = None;
                 Task::none()
             }
 
-            Message::ColorWindowPick(color, name) => {
-                // Interface colours are not drawing colours: keep them out of
-                // the recent list.
-                if !matches!(
-                    self.color_picker.as_ref().map(|picker| &picker.target),
-                    Some(crate::app::ColorPickTarget::Interface(_))
-                ) {
-                    self.note_recent_color(color);
-                }
-                self.on_color_window_pick(color, name)
-            }
-            Message::ColorBookLoaded(Ok(book)) => {
-                // A book loaded again replaces the earlier copy.
-                let index = crate::ui::color_select::book::add_or_replace(
-                    std::sync::Arc::make_mut(&mut self.color_books),
-                    book,
-                );
-                if let Some(picker) = self.color_picker.as_mut() {
-                    picker.show_book(std::sync::Arc::clone(&self.color_books), index);
-                }
-                Task::none()
-            }
-            Message::ColorBookLoaded(Err(error)) => {
-                if let Some(picker) = self.color_picker.as_mut().filter(|_| error != "Cancelled") {
-                    picker.set_status(error);
-                }
-                Task::none()
+            Message::ColorWindowPick(color) => {
+                self.note_recent_color(color);
+                self.on_color_window_pick(color)
             }
             Message::DsSetHandle { field, value } => self.on_ds_set_handle(field, value),
         }
-    }
-
-    /// The colour the Select Color panel shows as "Current", and whether the
-    /// selection it edits has mixed colours. A mixed selection starts from the
-    /// colour of its most recently drawn object (the highest handle).
-    /// Also returns the colour-book identity (`BOOK$NAME`) of that colour.
-    fn color_picker_current(
-        &self,
-        target: &crate::app::ColorPickTarget,
-        color: codec::types::Color,
-    ) -> (codec::types::Color, bool, Option<String>) {
-        let i = self.active_tab;
-        let document = &self.tabs[i].scene.document;
-        let name_of = |handle| {
-            document
-                .get_entity(handle)
-                .and_then(|entity| entity.common().color_name.clone())
-        };
-        match target {
-            crate::app::ColorPickTarget::Properties => {}
-            crate::app::ColorPickTarget::Ribbon => {
-                return (color, false, self.ribbon.active_color_name());
-            }
-            crate::app::ColorPickTarget::Layer(layer) => {
-                let name = document
-                    .layers
-                    .get(layer)
-                    .and_then(crate::ui::color_select::document::layer_identity);
-                return (color, false, name);
-            }
-            _ => return (color, false, None),
-        }
-        let mut colors = self
-            .property_target_handles(i)
-            .into_iter()
-            .filter_map(|handle| {
-                document
-                    .get_entity(handle)
-                    .map(|entity| (handle, entity.common().color))
-            })
-            .collect::<Vec<_>>();
-        let Some(&(first_handle, first)) = colors.first() else {
-            return (color, false, None);
-        };
-        if colors.iter().all(|&(_, c)| c == first) {
-            return (first, false, name_of(first_handle));
-        }
-        colors.sort_by_key(|&(handle, _)| handle);
-        let (newest_handle, newest) = colors.last().copied().unwrap_or((first_handle, color));
-        (newest, true, name_of(newest_handle))
-    }
-
-    /// The colour ByLayer stands for in the Select Color panel: the layer of
-    /// the newest selected object, or the current layer for new objects.
-    fn color_picker_layer_color(
-        &self,
-        target: &crate::app::ColorPickTarget,
-    ) -> Option<codec::types::Color> {
-        let i = self.active_tab;
-        let document = &self.tabs[i].scene.document;
-        let layer = match target {
-            crate::app::ColorPickTarget::Properties => self
-                .property_target_handles(i)
-                .into_iter()
-                .max()
-                .and_then(|handle| document.get_entity(handle))
-                .map_or(self.tabs[i].active_layer.as_str(), |entity| {
-                    entity.as_entity().layer()
-                }),
-            crate::app::ColorPickTarget::Ribbon => self.tabs[i].active_layer.as_str(),
-            _ => return None,
-        };
-        document.layers.get(layer).map(|layer| layer.color)
-    }
-
-    /// Read the built-in colour book and every `.acb` in the colour book
-    /// folder, once per session. A book in the folder replaces a built-in
-    /// one of the same name.
-    fn read_color_books(&mut self) {
-        if std::mem::replace(&mut self.color_books_read, true) {
-            return;
-        }
-        self.color_books = std::sync::Arc::new(crate::ui::color_select::book::read_all());
-    }
-
-    /// Colour the selected objects (or set the current colour when nothing
-    /// is selected). `name` is a colour-book identity, `BOOK$NAME`.
-    pub(super) fn set_property_color(
-        &mut self,
-        color: codec::types::Color,
-        name: Option<String>,
-    ) -> Task<Message> {
-        let i = self.active_tab;
-        let handles = self.property_target_handles(i);
-        if handles.is_empty() {
-            let task = self.on_ribbon_color_changed(color);
-            self.ribbon.active_color_book = name.map(|name| (color, name));
-            self.refresh_properties();
-            return task;
-        }
-        self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-            if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
-                crate::scene::view::dispatch::apply_named_color(entity, color, name.clone());
-            }
-        });
-        self.tabs[i].properties.color_picker_open = false;
-        Task::none()
-    }
-
-    /// Colour every selected layer (multi-select), not just one. `name` is a
-    /// colour-book identity, `BOOK$NAME`.
-    pub(super) fn set_layer_color(
-        &mut self,
-        color: codec::types::Color,
-        name: Option<&str>,
-    ) -> Task<Message> {
-        let i = self.active_tab;
-        // Layers keep the book and the colour name apart.
-        let (book_name, color_name) = match name.map(|name| name.split_once('$')) {
-            Some(Some((book, name))) => (Some(book), Some(name)),
-            Some(None) => (None, name),
-            None => (None, None),
-        };
-        let names = self.selected_layer_names(i);
-        if !names.is_empty() {
-            let undo = self.begin_layer_undo(i, "LAYER COLOR", &names);
-            for name in &names {
-                if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
-                    dl.color = color;
-                    dl.color_name = color_name.map(str::to_string);
-                    dl.book_name = book_name.map(str::to_string);
-                }
-            }
-            for pl in self.tabs[i].layers.layers.iter_mut() {
-                if names.contains(&pl.name) {
-                    pl.color = color;
-                    pl.color_name = color_name.map(str::to_string);
-                    pl.book_name = book_name.map(str::to_string);
-                }
-            }
-            self.tabs[i].dirty = true;
-            self.commit_layer_undo(i, undo);
-            // ByLayer color is baked into the cached wires at
-            // tessellation time, so bump the geometry epoch to
-            // invalidate the wire cache and repaint with the new color.
-            self.tabs[i].scene.invalidate_layer_dependencies(&names);
-            self.tabs[i].layers.color_picker_row = None;
-            self.tabs[i].layers.color_full_palette = false;
-            self.sync_ribbon_layers();
-        }
-        Task::none()
     }
 
     pub(crate) fn note_recent_color(&mut self, color: codec::types::Color) {
@@ -12418,13 +11517,12 @@ impl OpenCADStudio {
             codec::types::Color::Index(_) | codec::types::Color::Rgb { .. }
         ) {
             // No duplicates: selecting an existing colour moves it to the front.
-            let recent = &mut self.tabs[self.active_tab].recent_colors;
-            if let Some(pos) = recent.iter().position(|c| c == &color) {
-                recent.remove(pos);
+            if let Some(pos) = self.recent_colors.iter().position(|c| c == &color) {
+                self.recent_colors.remove(pos);
             }
 
-            recent.insert(0, color);
-            recent.truncate(12);
+            self.recent_colors.insert(0, color);
+            self.recent_colors.truncate(12);
         }
     }
 
@@ -12864,29 +11962,6 @@ mod free_text_entry_tests {
             .as_ref()
             .is_some_and(|cmd| cmd.name() == "PASTECLIP"));
     }
-
-    #[test]
-    fn space_bound_to_finalize_finalizes_in_free_text_mode() {
-        // #1710: when the user rebinds SPACE to FINALIZE in the CUI, pressing
-        // SPACE must run FINALIZE even while the command line holds focus,
-        // instead of falling through to the command line's CommandSpace
-        // (space-insert) behavior. FreeText mode distinguishes the two: a
-        // COMMANDSPACE would insert a space, while FINALIZE finishes the edit.
-        let (mut app, _) = app_with_cell_command("");
-        assert_eq!(app.text_entry_mode(), TextEntryMode::FreeText);
-
-        // Bind SPACE to FINALIZE (the CUI assignment from the issue).
-        app.shortcut_bindings
-            .insert("SPACE".to_string(), "FINALIZE".to_string());
-
-        // Pressing SPACE runs FINALIZE, which finishes the edit instead of
-        // inserting a space.
-        let _ = app.update(Message::ShortcutPressed("SPACE".to_string()));
-        assert!(
-            app.tabs[0].active_cmd.is_none(),
-            "SPACE bound to FINALIZE must finalize, not insert a space"
-        );
-    }
 }
 
 /// Set or clear one bit of `SELECTIONPREVIEW`.
@@ -12896,25 +11971,4 @@ fn set_preview_bit(current: u8, bit: u8, enabled: bool) -> u8 {
     } else {
         current & !bit
     }
-}
-
-/// Web autosave deadline (SAVETIME minutes), polled from a short tick: the
-/// first call arms it, a later one past it re-arms it and answers true.
-#[cfg(target_arch = "wasm32")]
-fn web_autosave_due(savetime_min: i32) -> bool {
-    use std::cell::Cell;
-    thread_local!(static DUE_MS: Cell<f64> = const { Cell::new(0.0) });
-    let now = js_sys::Date::now();
-    let period = savetime_min.max(0) as f64 * 60_000.0;
-    DUE_MS.with(|due| {
-        if period == 0.0 || due.get() == 0.0 {
-            due.set(if period == 0.0 { 0.0 } else { now + period });
-            return false;
-        }
-        let fire = now >= due.get();
-        if fire {
-            due.set(now + period);
-        }
-        fire
-    })
 }

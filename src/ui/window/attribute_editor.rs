@@ -59,8 +59,6 @@ pub struct AttrRow {
     pub color: AcadColor,
     pub linetype: String,
     pub line_weight: LineWeight,
-    /// Constant attributes cannot be edited.
-    pub is_constant: bool,
 }
 
 /// Combined justification options (horizontal × vertical), matching the
@@ -217,24 +215,7 @@ fn field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     }
 }
 
-fn disabled_field_style(theme: &Theme, _status: text_input::Status) -> text_input::Style {
-    let palette = theme.palette();
-    text_input::Style {
-        background: Background::Color(palette.background.weak.color),
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-        icon: palette.background.base.text.scale_alpha(0.38),
-        placeholder: palette.background.base.text.scale_alpha(0.38),
-        value: palette.background.base.text.scale_alpha(0.48),
-        selection: palette.primary.base.color.scale_alpha(0.2),
-    }
-}
-
 /// One `label : widget` row with a fixed-width label column.
-
 fn field_row<'a>(
     label: Cow<'static, str>,
     widget: Element<'a, Message>,
@@ -488,20 +469,13 @@ fn attribute_tab<'a>(
     }
 
     let sel = selected.min(rows.len() - 1);
-    let is_constant = rows[sel].is_constant;
-    let mut value_box = text_input("", rows[sel].value.as_str())
+    let value_box = text_input("", rows[sel].value.as_str())
+        .on_input(move |v| Message::AttrEditorInput { idx: sel, value: v })
+        .on_submit(Message::AttrEditorApply)
+        .style(field_style)
         .size(13)
         .padding([4, 6])
         .width(width);
-
-    if is_constant {
-        value_box = value_box.style(disabled_field_style);
-    } else {
-        value_box = value_box
-            .on_input(move |v| Message::AttrEditorInput { idx: sel, value: v })
-            .on_submit(Message::AttrEditorApply)
-            .style(field_style);
-    }
 
     column![
         head,

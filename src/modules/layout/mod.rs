@@ -2,7 +2,6 @@
 // This tab is only shown when the active layout is not "Model".
 
 pub mod mview;
-pub mod mvsetup;
 pub mod vplayer;
 
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, ToolDef};

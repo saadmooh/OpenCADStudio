@@ -77,3 +77,6 @@ mod zoom_extents_coverage;
 
 #[path = "zoom_extents_xline.rs"]
 mod zoom_extents_xline;
+
+#[path = "civil_dynamic_parcel_reactor.rs"]
+mod civil_dynamic_parcel_reactor;

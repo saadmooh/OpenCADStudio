@@ -107,7 +107,7 @@ impl<'a> HostSession<'a> {
         *slot = attribute;
         self.app.tabs[self.tab]
             .scene
-            .update_entity_plugin(EntityType::Insert(insert))
+            .update_entity(EntityType::Insert(insert))
     }
 
     pub fn document_view(&mut self) -> Option<ocs_plugin_api::shm::DocumentViewInfo> {
@@ -142,27 +142,10 @@ impl<'a> HostSession<'a> {
             let key = (self.tab_id(), self.app.tabs[self.tab].scene.geometry_epoch);
             if self.app.last_plugin_document != Some(key) {
                 v4_support::publish_drawing_changed(key.0, key.1);
-                // The plain `DocumentChanged` follows the same immediate
-                // publish contract (API v9): a plugin-initiated write settles
-                // here, so native plugins' `on_notification` sees it now —
-                // the message boundary's fingerprint guard then dedupes.
-                v4_support::publish_document_changed(key.1);
             }
             v4_support::publish_document_view_v4(self.tab_id(), doc);
             self.app.last_plugin_document =
                 Some((self.tab_id(), self.app.tabs[self.tab].scene.geometry_epoch));
-        }
-    }
-
-    /// Plugin-driven edits refresh the app-side selection caches exactly
-    /// like built-in edit paths: a selected entity's grip markers are cached
-    /// and would otherwise rest at their pre-edit positions (found by the
-    /// civil plugin's manual QA, 2026-10-12).
-    fn refresh_grips_of_active_tab(&mut self) {
-        // The grip cache mirrors the active tab's scene; a session may target
-        // a background tab, whose edits must not disturb it.
-        if self.tab == self.app.active_tab {
-            self.app.refresh_selected_grips();
         }
     }
 
@@ -378,7 +361,7 @@ impl<'a> HostSession<'a> {
             insert.attributes.push(attribute);
             if !self.app.tabs[self.tab]
                 .scene
-                .update_entity_plugin(EntityType::Insert(insert))
+                .update_entity(EntityType::Insert(insert))
             {
                 return Handle::NULL;
             }
@@ -420,12 +403,11 @@ impl<'a> HostSession<'a> {
         }
         let ok = match entity {
             EntityType::AttributeEntity(attribute) => self.replace_nested_attribute(attribute),
-            entity => self.app.tabs[self.tab].scene.update_entity_plugin(entity),
+            entity => self.app.tabs[self.tab].scene.update_entity(entity),
         };
         self.app.sync_registered_layers(self.tab);
         if ok {
             self.publish_document_view();
-            self.refresh_grips_of_active_tab();
         }
         ok
     }
@@ -478,14 +460,13 @@ impl<'a> HostSession<'a> {
             // the document exclusively.
             let updated = match entity {
                 EntityType::AttributeEntity(attribute) => self.replace_nested_attribute(attribute),
-                entity => self.app.tabs[self.tab].scene.update_entity_plugin(entity),
+                entity => self.app.tabs[self.tab].scene.update_entity(entity),
             };
             assert!(updated);
         }
         self.app.sync_registered_layers(self.tab);
         self.set_dirty();
         self.publish_document_view();
-        self.refresh_grips_of_active_tab();
         Ok(())
     }
 
@@ -524,28 +505,6 @@ impl<'a> HostSession<'a> {
         Ok(())
     }
 
-    /// Erase through the plugin path while keeping reference-only designations
-    /// undoable with the erase (API v9). The designation set is scene state,
-    /// not a document write: erasing drops the set entry in
-    /// `Scene::remove_entities`, so its first-touch before-image must join the
-    /// open plugin scope here — otherwise undoing the erase would restore the
-    /// entity without its designation. No-op for undesignated handles and when
-    /// no scope is open (then the erase follows the same no-bookkeeping
-    /// contract as any other entity write).
-    fn erase_entities_recording_designations(&mut self, handles: &[Handle]) {
-        for &handle in handles {
-            if self.app.tabs[self.tab]
-                .scene
-                .reference_only
-                .is_marked(handle)
-            {
-                self.app
-                    .record_reference_designation_before_pending(self.tab, handle, true);
-            }
-        }
-        self.app.tabs[self.tab].scene.erase_entities_plugin(handles);
-    }
-
     /// Delete the entity with `handle`, keeping the scene's render caches in
     /// sync. Returns `false` when the entity is absent or on a locked layer
     /// (which `erase_entities` refuses to remove).
@@ -567,7 +526,6 @@ impl<'a> HostSession<'a> {
                 .update_entity(EntityType::Insert(insert));
             if removed {
                 self.publish_document_view();
-                self.refresh_grips_of_active_tab();
             }
             return removed;
         }
@@ -575,7 +533,7 @@ impl<'a> HostSession<'a> {
             .document()
             .get_entity(handle)
             .map(|entity| entity.common().owner_handle);
-        self.erase_entities_recording_designations(&[handle]);
+        self.app.tabs[self.tab].scene.erase_entities(&[handle]);
         let removed = self.document().get_entity(handle).is_none();
         if removed {
             // The document keeps a block record's member list separately from the
@@ -592,7 +550,6 @@ impl<'a> HostSession<'a> {
                 }
             }
             self.publish_document_view();
-            self.refresh_grips_of_active_tab();
         }
         removed
     }
@@ -943,7 +900,7 @@ impl<'a> HostSession<'a> {
                     frame.common.layer = layer;
                 }
                 self.push_undo("Embed picture");
-                let handle = self.add_entity(EntityType::Ole2Frame(Box::new(frame)));
+                let handle = self.add_entity(EntityType::Ole2Frame(frame));
                 if handle.is_null() {
                     return Err("the picture frame could not be added".into());
                 }
@@ -1165,7 +1122,7 @@ impl<'a> HostSession<'a> {
             return Err("the result could not be added".into());
         }
         if delete_source {
-            self.erase_entities_recording_designations(&[source]);
+            self.app.tabs[self.tab].scene.erase_entities(&[source]);
             self.publish_document_view();
         }
         Ok(handle)
@@ -1428,7 +1385,7 @@ impl<'a> HostSession<'a> {
                 self.push_undo("Delete layer");
                 self.document_mut().layers.remove(&name);
                 if !on_layer.is_empty() {
-                    self.erase_entities_recording_designations(&on_layer);
+                    self.app.tabs[self.tab].scene.erase_entities(&on_layer);
                 }
                 self.finish_layer_change(&[name]);
                 Ok(handle)
@@ -2283,7 +2240,7 @@ impl<'a> HostSession<'a> {
                     }
                 }
                 if erase_originals {
-                    self.erase_entities_recording_designations(&entities);
+                    self.app.tabs[self.tab].scene.erase_entities(&entities);
                 }
                 self.finish_block_change();
                 Ok(handle)
@@ -2380,75 +2337,78 @@ impl<'a> HostSession<'a> {
                 Ok(handle)
             }
             TableOperation::BlockRename { from, to } => {
-                let from = from.trim().to_owned();
-                let to = to.trim().to_owned();
-                let open_edits = self.open_block_edits();
-                let handle = self
-                    .document()
-                    .block_records
-                    .get(&from)
-                    .map(|record| record.handle)
-                    .unwrap_or(Handle::NULL);
-                self.push_undo(&format!("Rename block {from} to {to}"));
-                match crate::scene::block_service::rename(
-                    &mut self.app.tabs[self.tab].scene,
-                    &from,
-                    &to,
-                    &open_edits,
-                ) {
-                    Ok(_) => {
-                        self.finish_block_change();
-                        Ok(handle)
-                    }
-                    Err(error) => {
-                        self.app.discard_last_undo_entry(self.tab);
-                        Err(error.to_string())
-                    }
+                let (from, handle) = editable_block(self.document(), from.trim())?;
+                let to = validated_symbol_name(&to, "a block name")?;
+                if to.starts_with('*') {
+                    return Err("a block name cannot start with '*'".to_owned());
                 }
+                if from.eq_ignore_ascii_case(&to) {
+                    return Err("the new block name matches the current one (a case-only change is not supported)".to_owned());
+                }
+                if self.document().block_records.get(&to).is_some() {
+                    return Err(format!("block {to:?} already exists"));
+                }
+                self.push_undo("Rename block");
+                if !self.app.tabs[self.tab].scene.rename_block(&from, &to) {
+                    return Err("the block could not be renamed".to_owned());
+                }
+                self.finish_block_change();
+                Ok(handle)
             }
             TableOperation::BlockDelete { name } => {
-                let name = name.trim().to_owned();
-                // The external API has no force flag, so a referenced block is
-                // always refused here — same rule as the palette.
-                let open_edits = self.open_block_edits();
-                let handle = self
-                    .document()
-                    .block_records
-                    .get(&name)
-                    .map(|record| record.handle)
-                    .unwrap_or(Handle::NULL);
-                self.push_undo(&format!("Delete block {name}"));
-                match crate::scene::block_service::delete(
-                    &mut self.app.tabs[self.tab].scene,
-                    &name,
-                    crate::scene::block_service::DeleteOptions {
-                        force: false,
-                        open_edits: &open_edits,
-                    },
-                ) {
-                    Ok(_) => {
-                        self.finish_block_change();
-                        Ok(handle)
+                let (name, handle) = editable_block(self.document(), name.trim())?;
+                let doc = self.document();
+                let referenced = doc.entities().any(|entity| match entity {
+                    E::Insert(insert) => insert.block_name.eq_ignore_ascii_case(&name),
+                    E::MultiLeader(leader) => {
+                        leader.block_content_handle == Some(handle)
+                            || leader.context.block_content_handle == Some(handle)
                     }
-                    Err(error) => {
-                        self.app.discard_last_undo_entry(self.tab);
-                        Err(error.to_string())
-                    }
+                    _ => false,
+                }) || doc.dim_styles.iter().any(|style| {
+                    [style.dimblk, style.dimblk1, style.dimblk2, style.dimldrblk].contains(&handle)
+                });
+                if referenced {
+                    return Err(format!(
+                        "block {name:?} is still inserted or used by a style or leader"
+                    ));
                 }
+                let members: Vec<Handle> = {
+                    let record = doc.block_records.get(&name).expect("checked above");
+                    let mut members = record.entity_handles.clone();
+                    members.push(record.block_entity_handle);
+                    members.push(record.block_end_handle);
+                    members
+                };
+                self.push_undo("Delete block");
+                let doc = self.document_mut();
+                for member in members {
+                    doc.remove_entity(member);
+                }
+                doc.block_records.remove(&name);
+                let orphans: Vec<Handle> = {
+                    let live: std::collections::HashSet<Handle> =
+                        doc.block_records.iter().map(|r| r.handle).collect();
+                    doc.objects
+                        .iter()
+                        .filter_map(|(h, object)| match object {
+                            codec::objects::ObjectType::SortEntitiesTable(table)
+                                if !live.contains(&table.block_owner_handle) =>
+                            {
+                                Some(*h)
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                };
+                for orphan in orphans {
+                    doc.objects.remove(&orphan);
+                }
+                self.finish_block_change();
+                Ok(handle)
             }
             _ => Err("unsupported table operation".to_owned()),
         }
-    }
-
-    /// Block records this document has open in a BEDIT session. Nested
-    /// sessions all count, so the whole stack is handed to the block service,
-    /// which refuses delete/rename and skips PURGE for every one of them.
-    fn open_block_edits(&self) -> Vec<Handle> {
-        self.app.tabs[self.tab]
-            .block_edits
-            .iter()
-            .map(|session| session.br_handle)
-            .collect()
     }
 
     fn finish_block_change(&mut self) {
@@ -2817,434 +2777,6 @@ impl<'a> HostSession<'a> {
         self.publish_document_view();
         true
     }
-
-    // ── XRecord objects (API v8, additive) ────────────────────────────────────
-    //
-    // XRecords are non-graphical objects: name-addressed typed group-code/value
-    // pairs stored under the drawing's named-object dictionary, where a
-    // drawing keeps application data. They give scripts a record carrier that
-    // lives in the file and survives model view entirely, with no carrier
-    // entity.
-
-    /// The dictionary addressed by `dictionary_path` under the named-object
-    /// dictionary root (an empty path is the root itself). Nothing is created:
-    /// a missing fragment is an error, and so is a fragment that exists but
-    /// names a non-dictionary object.
-    fn xrecord_dictionary_at(&self, dictionary_path: &[&str]) -> Result<Handle, String> {
-        use codec::objects::ObjectType;
-        let root = self.document().header.named_objects_dict_handle;
-        if !matches!(
-            self.document().objects.get(&root),
-            Some(ObjectType::Dictionary(_))
-        ) {
-            return Err("the drawing has no named-object dictionary".to_owned());
-        }
-        let mut current = root;
-        for fragment in dictionary_path {
-            let name = validated_symbol_name(fragment, "a dictionary name")?;
-            match self.document().objects.get(&current) {
-                Some(ObjectType::Dictionary(dictionary)) => match dictionary.get(&name) {
-                    Some(child) => {
-                        if !matches!(
-                            self.document().objects.get(&child),
-                            Some(ObjectType::Dictionary(_))
-                        ) {
-                            return Err(format!("dictionary entry {name:?} is not a dictionary"));
-                        }
-                        current = child;
-                    }
-                    None => return Err(format!("dictionary {name:?} does not exist")),
-                },
-                _ => return Err(format!("dictionary {current:?} does not exist")),
-            }
-        }
-        Ok(current)
-    }
-
-    /// The deepest ancestor of `dictionary_path` that already exists, and how
-    /// deep the path resolved. Errors when a fragment that exists names a
-    /// non-dictionary object. Creation calls this first so its refusals happen
-    /// before the undo step is recorded.
-    fn deepest_existing_xrecord_dictionary(
-        &self,
-        dictionary_path: &[&str],
-    ) -> Result<(Handle, usize), String> {
-        use codec::objects::ObjectType;
-        let root = self.document().header.named_objects_dict_handle;
-        if !matches!(
-            self.document().objects.get(&root),
-            Some(ObjectType::Dictionary(_))
-        ) {
-            return Err("the drawing has no named-object dictionary".to_owned());
-        }
-        let mut current = root;
-        let mut depth = 0usize;
-        for fragment in dictionary_path {
-            let name = validated_symbol_name(fragment, "a dictionary name")?;
-            match self.document().objects.get(&current) {
-                Some(ObjectType::Dictionary(dictionary)) => match dictionary.get(&name) {
-                    Some(child) => {
-                        if !matches!(
-                            self.document().objects.get(&child),
-                            Some(ObjectType::Dictionary(_))
-                        ) {
-                            return Err(format!("dictionary entry {name:?} is not a dictionary"));
-                        }
-                        current = child;
-                        depth += 1;
-                    }
-                    None => break,
-                },
-                _ => return Err(format!("dictionary {current:?} does not exist")),
-            }
-        }
-        Ok((current, depth))
-    }
-
-    /// Walk `dictionary_path` from the named-object dictionary root, creating
-    /// missing dictionaries on the way — the same bootstrap
-    /// `ensure_image_dictionary` uses for ACAD_IMAGE_DICT: each new dictionary
-    /// owns its handle, is owned by its parent and is registered in the parent
-    /// under its name. Mutates; only valid after the caller validated the path
-    /// and recorded its undo step.
-    fn xrecord_dictionary_at_or_create(
-        &mut self,
-        dictionary_path: &[&str],
-    ) -> Result<Handle, String> {
-        use codec::objects::{Dictionary, ObjectType};
-        let root = self.document().header.named_objects_dict_handle;
-        if !matches!(
-            self.document().objects.get(&root),
-            Some(ObjectType::Dictionary(_))
-        ) {
-            return Err("the drawing has no named-object dictionary".to_owned());
-        }
-        let mut current = root;
-        for fragment in dictionary_path {
-            let name = validated_symbol_name(fragment, "a dictionary name")?;
-            let existing = match self.document().objects.get(&current) {
-                Some(ObjectType::Dictionary(dictionary)) => dictionary.get(&name),
-                _ => return Err(format!("dictionary {current:?} does not exist")),
-            };
-            match existing {
-                Some(child) => {
-                    if !matches!(
-                        self.document().objects.get(&child),
-                        Some(ObjectType::Dictionary(_))
-                    ) {
-                        return Err(format!("dictionary entry {name:?} is not a dictionary"));
-                    }
-                    current = child;
-                }
-                None => {
-                    let child = self.document_mut().allocate_handle();
-                    let mut dictionary = Dictionary::new();
-                    dictionary.handle = child;
-                    dictionary.owner = current;
-                    self.document_mut()
-                        .objects
-                        .insert(child, ObjectType::Dictionary(dictionary));
-                    if let Some(ObjectType::Dictionary(entries)) =
-                        self.document_mut().objects.get_mut(&current)
-                    {
-                        entries.add_entry(name, child);
-                    }
-                    current = child;
-                }
-            }
-        }
-        Ok(current)
-    }
-
-    /// Undo composition for XRecord writes. Plugins may open one `push_undo`
-    /// scope for a whole operation — the same contract entity writes follow
-    /// (`add_entity` and friends perform no undo bookkeeping of their own) —
-    /// and every XRecord mutation inside it joins that open scope, so the
-    /// finished scope is a single undo step under the plugin's own label that
-    /// restores (and redoes) the whole operation at once. Only a mutation with
-    /// no scope open opens its own — and then the caller finishes it again,
-    /// keeping a scope-less call one undo step (the `table_operation` /
-    /// `update_entities_transaction` behavior). Refusals never reach this:
-    /// they are decided before any change. Returns whether this call opened
-    /// its own scope.
-    fn ensure_xrecord_undo_scope(&mut self, label: &str) -> bool {
-        if self.app.tabs[self.tab].history.pending.is_none() {
-            self.push_undo(label);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Create an XRecord named `name` under `dictionary_path`, storing
-    /// `entries` (API v8, additive). Missing dictionaries on the path are
-    /// created, so the first call seeds a plugin's namespace; the name must be
-    /// unused (dictionary lookup is case-insensitive). Every refusal happens
-    /// before the undo scope is touched, so a failure changes nothing. The
-    /// created record is registered in — and owned by — its dictionary, and
-    /// the new handle is returned.
-    ///
-    /// Undo composition: a mutation inside a plugin-opened `push_undo` scope
-    /// joins it (see [`HostSession::ensure_xrecord_undo_scope`]); a scope-less
-    /// call is one undo step of its own.
-    pub fn create_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-        entries: Vec<codec::objects::XRecordEntry>,
-    ) -> Result<Handle, String> {
-        use codec::objects::{ObjectType, XRecord};
-        let name = validated_symbol_name(name, "an XRecord name")?;
-        validated_xrecord_entries(&entries)?;
-        // Pre-check the path: fragments that already exist must be
-        // dictionaries, and when the full path exists the name must be free —
-        // create must never silently overwrite a key.
-        let (deepest, depth) = self.deepest_existing_xrecord_dictionary(dictionary_path)?;
-        if depth == dictionary_path.len() {
-            if let Some(ObjectType::Dictionary(dictionary)) = self.document().objects.get(&deepest)
-            {
-                if dictionary.get(&name).is_some() {
-                    return Err(format!("XRecord {name:?} already exists"));
-                }
-            }
-        }
-        let own_scope = self.ensure_xrecord_undo_scope("Create XRecord");
-        // The pre-check ruled out every failure mode; the walk now only creates
-        // the dictionary fragments that were missing.
-        let dictionary = self
-            .xrecord_dictionary_at_or_create(dictionary_path)
-            .expect("validated dictionary path");
-        let handle = self.document_mut().allocate_handle();
-        let mut record = XRecord::named(name.clone());
-        record.handle = handle;
-        record.owner = dictionary;
-        record.entries = entries;
-        record.synchronize_object_references();
-        self.document_mut()
-            .objects
-            .insert(handle, ObjectType::XRecord(record));
-        if let Some(ObjectType::Dictionary(entries)) =
-            self.document_mut().objects.get_mut(&dictionary)
-        {
-            entries.add_entry(name, handle);
-        }
-        self.set_dirty();
-        self.publish_document_view();
-        if own_scope {
-            self.app.finish_pending_history(self.tab);
-        }
-        Ok(handle)
-    }
-
-    /// Read the entries of an existing XRecord by name (API v8, additive).
-    /// The entries are returned verbatim; the path, the name and the target
-    /// kind are validated first, so a refusal changes nothing.
-    pub fn read_xrecord(
-        &self,
-        dictionary_path: &[&str],
-        name: &str,
-    ) -> Result<Vec<codec::objects::XRecordEntry>, String> {
-        use codec::objects::ObjectType;
-        let (_, _, handle) = self.xrecord_lookup(dictionary_path, name)?;
-        match self.document().objects.get(&handle) {
-            Some(ObjectType::XRecord(record)) => Ok(record.entries.clone()),
-            _ => unreachable!("validated XRecord"),
-        }
-    }
-
-    /// Atomically replace the entries of an existing XRecord (API v8,
-    /// additive). Neither the path nor its dictionaries are created — an
-    /// update must never create anything silently. Identity (handle, owning
-    /// dictionary, name) stays; the entries and their DWG handle-reference
-    /// stream are replaced and the record's verbatim raw payloads are dropped,
-    /// so later saves emit the new content. Every refusal happens before the
-    /// undo scope is touched. Undo composition: a mutation inside a
-    /// plugin-opened `push_undo` scope joins it (see
-    /// [`HostSession::ensure_xrecord_undo_scope`]); a scope-less call is one
-    /// undo step of its own.
-    pub fn update_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-        entries: Vec<codec::objects::XRecordEntry>,
-    ) -> Result<Handle, String> {
-        use codec::objects::ObjectType;
-        validated_xrecord_entries(&entries)?;
-        let (_, _, handle) = self.xrecord_lookup(dictionary_path, name)?;
-        let own_scope = self.ensure_xrecord_undo_scope("Update XRecord");
-        let record = match self.document_mut().objects.get_mut(&handle) {
-            Some(ObjectType::XRecord(record)) => record,
-            _ => unreachable!("validated XRecord"),
-        };
-        record.entries = entries;
-        // Rebuild the DWG object-reference stream from the new 330-369 entries
-        // and drop the verbatim bytes an earlier load kept: the update fully
-        // defines the record now.
-        record.synchronize_object_references();
-        record.preserve_object_reference_stream = false;
-        record.entries_complete = true;
-        record.raw_data.clear();
-        record.raw_dwg_data = None;
-        record.raw_dwg_handle_bits = 0;
-        record.raw_dwg_version = None;
-        self.set_dirty();
-        self.publish_document_view();
-        if own_scope {
-            self.app.finish_pending_history(self.tab);
-        }
-        Ok(handle)
-    }
-
-    /// Delete the XRecord named `name` and its dictionary entry (API v8,
-    /// additive). Returns the removed record with its prior content, so audits
-    /// keep what they removed. Every refusal happens before the undo scope is
-    /// touched. Undo composition: a mutation inside a plugin-opened
-    /// `push_undo` scope joins it (see
-    /// [`HostSession::ensure_xrecord_undo_scope`]); a scope-less call is one
-    /// undo step of its own.
-    pub fn delete_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-    ) -> Result<codec::objects::XRecord, String> {
-        use codec::objects::ObjectType;
-        let (dictionary, name, handle) = self.xrecord_lookup(dictionary_path, name)?;
-        let own_scope = self.ensure_xrecord_undo_scope("Delete XRecord");
-        let removed = match self.document_mut().objects.remove(&handle) {
-            Some(ObjectType::XRecord(record)) => record,
-            _ => unreachable!("validated XRecord"),
-        };
-        if let Some(ObjectType::Dictionary(entries)) =
-            self.document_mut().objects.get_mut(&dictionary)
-        {
-            entries
-                .entries
-                .retain(|(key, value)| !key.eq_ignore_ascii_case(&name) || *value != handle);
-        }
-        self.set_dirty();
-        self.publish_document_view();
-        if own_scope {
-            self.app.finish_pending_history(self.tab);
-        }
-        Ok(removed)
-    }
-
-    /// List the XRecord names under the dictionary addressed by
-    /// `dictionary_path` (API v8, additive): the dictionary keys that address
-    /// XRecord objects, in the dictionary's own order, so consumers can audit
-    /// and export without knowing names in advance. Non-XRecord entries are
-    /// not listed.
-    pub fn list_xrecords(&self, dictionary_path: &[&str]) -> Result<Vec<String>, String> {
-        use codec::objects::ObjectType;
-        let dictionary = self.xrecord_dictionary_at(dictionary_path)?;
-        let Some(ObjectType::Dictionary(entries)) = self.document().objects.get(&dictionary) else {
-            return Err(format!("dictionary {dictionary:?} does not exist"));
-        };
-        Ok(entries
-            .entries
-            .iter()
-            .filter_map(|(key, handle)| match self.document().objects.get(handle) {
-                Some(ObjectType::XRecord(_)) => Some(key.clone()),
-                _ => None,
-            })
-            .collect())
-    }
-
-    /// Mark (or unmark) an entity as reference-only (API v9, additive):
-    /// plugin-owned display geometry the built-in edit paths treat like a
-    /// locked-layer entity, while the owning plugin keeps full write access
-    /// through this session. The designation is a scene-scoped in-memory set
-    /// keyed by handle: nothing is written to the saved DWG/DXF, the set dies
-    /// with the tab, and a reloaded drawing starts undesignated — the owning
-    /// plugin re-marks on the `DocumentOpened` notification, which makes the
-    /// in-memory designation fully equivalent to a persisted one for its use
-    /// case.
-    ///
-    /// Every refusal — absent entity, locked layer — is decided before the
-    /// undo scope is touched, so a failure changes nothing. A call that would
-    /// not change the current designation succeeds without recording an undo
-    /// step, without bumping the geometry epoch and without publishing — the
-    /// idempotence that terminates the re-mark loop driven by the
-    /// document-changed dispatch. Undo composition: a change inside a
-    /// plugin-opened `push_undo` scope joins it (see
-    /// [`HostSession::ensure_xrecord_undo_scope`]); a scope-less call is one
-    /// undo step of its own. The set is scene state, not a document write, so
-    /// the undo delta restores it through the explicit designation channel
-    /// (`DeltaSnapshot::reference_designations`).
-    pub fn set_reference_only(
-        &mut self,
-        handle: Handle,
-        reference_only: bool,
-    ) -> Result<(), String> {
-        // Refusals precede any change (and any undo step).
-        if self.document().get_entity(handle).is_none() {
-            return Err(format!("entity {handle:?} does not exist"));
-        }
-        if self.app.tabs[self.tab].scene.is_layer_locked(handle) {
-            return Err(format!("entity {handle:?} is on a locked layer"));
-        }
-        if self.app.tabs[self.tab].scene.is_reference_only(handle) == reference_only {
-            return Ok(());
-        }
-        let own_scope = self.ensure_xrecord_undo_scope("Set Reference-Only");
-        // First-touch before-image for the pending scope's designation
-        // channel, recorded before the set changes (see
-        // `Scene::record_undo_reference_designation_before`).
-        let before = self.app.tabs[self.tab]
-            .scene
-            .reference_only
-            .is_marked(handle);
-        self.app
-            .record_reference_designation_before_pending(self.tab, handle, before);
-        self.app.tabs[self.tab]
-            .scene
-            .set_reference_only_membership(handle, reference_only);
-        debug_assert!(
-            self.app.tabs[self.tab]
-                .scene
-                .reference_only
-                .is_marked(handle)
-                == reference_only,
-            "designation state was checked before the mutation"
-        );
-        // The wires carry the click-through stamp baked at tessellation, so a
-        // designation change must rebuild them: bump_geometry clears the
-        // tessellation memos and resident wire sets exactly like an entity
-        // edit would.
-        self.bump_geometry();
-        self.set_dirty();
-        self.publish_document_view();
-        if own_scope {
-            self.app.finish_pending_history(self.tab);
-        }
-        Ok(())
-    }
-
-    /// Resolve an existing XRecord to its containing dictionary, its validated
-    /// name and its handle, after validating the path, the name and the target
-    /// kind.
-    fn xrecord_lookup(
-        &self,
-        dictionary_path: &[&str],
-        name: &str,
-    ) -> Result<(Handle, String, Handle), String> {
-        use codec::objects::ObjectType;
-        let dictionary = self.xrecord_dictionary_at(dictionary_path)?;
-        let name = validated_symbol_name(name, "an XRecord name")?;
-        let Some(ObjectType::Dictionary(entries)) = self.document().objects.get(&dictionary) else {
-            return Err(format!("dictionary {dictionary:?} does not exist"));
-        };
-        let Some(handle) = entries.get(&name) else {
-            return Err(format!("XRecord {name:?} does not exist"));
-        };
-        if !matches!(
-            self.document().objects.get(&handle),
-            Some(ObjectType::XRecord(_))
-        ) {
-            return Err(format!("dictionary entry {name:?} is not an XRecord"));
-        }
-        Ok((dictionary, name, handle))
-    }
 }
 
 /// True when block `outer` (transitively) contains an insert of `target`.
@@ -3290,28 +2822,6 @@ fn validated_symbol_name(raw: &str, what: &str) -> Result<String, String> {
         return Err(format!("{what} cannot contain {bad:?}"));
     }
     Ok(name.to_owned())
-}
-
-/// Validate the entries an XRecord create or update wants to store: each needs
-/// a group code the codec model admits (1..=369; 5 and 105 are reserved for
-/// object handles). Refused before any change so bad input never reaches a
-/// file.
-fn validated_xrecord_entries(entries: &[codec::objects::XRecordEntry]) -> Result<(), String> {
-    for entry in entries {
-        if !(1..=369).contains(&entry.code) {
-            return Err(format!(
-                "XRecord group code {} is out of range 1..=369",
-                entry.code
-            ));
-        }
-        if entry.code == 5 || entry.code == 105 {
-            return Err(format!(
-                "XRecord group code {} is reserved for the object handle",
-                entry.code
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn apply_text_style_config(
@@ -3589,42 +3099,6 @@ impl HostApi for HostSession<'_> {
         request: ocs_plugin_api::host::CommandRequest,
     ) -> Result<ocs_plugin_api::host::CommandOutcome, String> {
         self.run_command(request)
-    }
-    fn create_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-        entries: Vec<ocs_plugin_api::host::XRecordEntry>,
-    ) -> Result<Handle, String> {
-        self.create_xrecord(dictionary_path, name, entries)
-    }
-    fn read_xrecord(
-        &self,
-        dictionary_path: &[&str],
-        name: &str,
-    ) -> Result<Vec<ocs_plugin_api::host::XRecordEntry>, String> {
-        self.read_xrecord(dictionary_path, name)
-    }
-    fn update_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-        entries: Vec<ocs_plugin_api::host::XRecordEntry>,
-    ) -> Result<Handle, String> {
-        self.update_xrecord(dictionary_path, name, entries)
-    }
-    fn delete_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-    ) -> Result<ocs_plugin_api::host::XRecord, String> {
-        self.delete_xrecord(dictionary_path, name)
-    }
-    fn list_xrecords(&self, dictionary_path: &[&str]) -> Result<Vec<String>, String> {
-        self.list_xrecords(dictionary_path)
-    }
-    fn set_reference_only(&mut self, handle: Handle, reference_only: bool) -> Result<(), String> {
-        self.set_reference_only(handle, reference_only)
     }
 }
 
@@ -4124,399 +3598,6 @@ mod tests {
         assert!(
             matches!(app.tabs[0].scene.document.get_entity(second), Some(EntityType::Point(p)) if p.location.x == 20.0)
         );
-    }
-
-    #[test]
-    fn xrecord_crud_round_trips_refusals_and_list() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        let entries = || {
-            vec![
-                codec::objects::XRecordEntry::string(1, "{\"k\":\"road\",\"s\":1}"),
-                codec::objects::XRecordEntry::double(40, 0.125),
-                codec::objects::XRecordEntry::int16(70, 3),
-                codec::objects::XRecordEntry::int32(90, -45000),
-                codec::objects::XRecordEntry::bool(290, true),
-            ]
-        };
-
-        // Create seeds the namespace: the dictionary chain is auto-created and
-        // reading returns the entries verbatim.
-        let alpha = host.create_xrecord(&["CVIFC"], "alpha", entries()).unwrap();
-        assert!(!alpha.is_null());
-        assert_eq!(host.read_xrecord(&["CVIFC"], "alpha").unwrap(), entries());
-        // Dictionary lookup is case-insensitive, both for the path …
-        assert_eq!(host.read_xrecord(&["cvifc"], "alpha").unwrap(), entries());
-        // … and re-creating an existing name is refused without any change.
-        assert!(host
-            .create_xrecord(&["cvifc"], "ALPHA", entries())
-            .unwrap_err()
-            .contains("already exists"));
-
-        // Namespace reuse is idempotent: the root still holds one CVIFC entry.
-        let beta = host.create_xrecord(&["CVIFC"], "beta", entries()).unwrap();
-        let root = host.document().header.named_objects_dict_handle;
-        let cvifc_entries = match host.document().objects.get(&root) {
-            Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
-                .entries
-                .iter()
-                .filter(|(key, _)| key.eq_ignore_ascii_case("CVIFC"))
-                .count(),
-            _ => 0,
-        };
-        assert_eq!(cvifc_entries, 1);
-
-        // Listing names only the keys that address XRecords, in dictionary
-        // order; a nested dictionary is not an XRecord.
-        host.create_xrecord(&["CVIFC", "LAYOUTS"], "nested", entries())
-            .unwrap();
-        assert_eq!(
-            host.list_xrecords(&["CVIFC"]).unwrap(),
-            vec!["alpha".to_owned(), "beta".to_owned()]
-        );
-        assert_eq!(
-            host.list_xrecords(&["CVIFC", "LAYOUTS"]).unwrap(),
-            vec!["nested".to_owned()]
-        );
-        // The root dictionary holds non-XRecord entries (ACAD_LAYOUT et al.);
-        // listing only reports XRecords.
-        let root_names = host.list_xrecords(&[]).unwrap();
-        assert!(!root_names
-            .iter()
-            .any(|n| n.eq_ignore_ascii_case("ACAD_LAYOUT")));
-
-        // Update refuses on a missing name and never creates anything.
-        assert!(host
-            .update_xrecord(&["CVIFC"], "gamma", entries())
-            .unwrap_err()
-            .contains("does not exist"));
-        // Case-insensitive resolution finds the stored ALPHA and replaces its
-        // entries atomically; the handle is stable.
-        assert_eq!(
-            host.update_xrecord(
-                &["CVIFC"],
-                "ALPHA",
-                vec![codec::objects::XRecordEntry::string(1, "v2")]
-            )
-            .unwrap(),
-            alpha
-        );
-        assert_eq!(
-            host.read_xrecord(&["CVIFC"], "alpha").unwrap(),
-            vec![codec::objects::XRecordEntry::string(1, "v2")]
-        );
-
-        // Entries are validated before any change: reserved and out-of-range
-        // group codes refuse (5 and 105 are the object handle codes).
-        assert!(host
-            .create_xrecord(
-                &["CVIFC"],
-                "gamma",
-                vec![codec::objects::XRecordEntry::int16(5, 1)]
-            )
-            .unwrap_err()
-            .contains("reserved"));
-        assert!(host
-            .create_xrecord(
-                &["CVIFC"],
-                "gamma",
-                vec![codec::objects::XRecordEntry::int16(400, 1)]
-            )
-            .unwrap_err()
-            .contains("out of range"));
-        assert!(host
-            .update_xrecord(
-                &["CVIFC"],
-                "alpha",
-                vec![codec::objects::XRecordEntry::int16(105, 1)]
-            )
-            .is_err());
-        assert_eq!(
-            host.read_xrecord(&["CVIFC"], "alpha").unwrap(),
-            vec![codec::objects::XRecordEntry::string(1, "v2")]
-        );
-        // Dictionary and record names are symbol names.
-        assert!(host.create_xrecord(&["CVIFC"], "  ", entries()).is_err());
-        assert!(host
-            .create_xrecord(&["CVIFC", "A|B"], "gamma", entries())
-            .is_err());
-        assert!(host.create_xrecord(&["CVIFC"], "a<b", entries()).is_err());
-
-        // Reads distinguish a missing dictionary, a missing name and a name
-        // that addresses another object kind.
-        assert!(host
-            .read_xrecord(&["NOPE"], "alpha")
-            .unwrap_err()
-            .contains("does not exist"));
-        assert!(host
-            .read_xrecord(&["CVIFC", "LAYOUTS"], "alpha")
-            .unwrap_err()
-            .contains("does not exist"));
-        assert!(host
-            .delete_xrecord(&["CVIFC"], "LAYOUTS")
-            .unwrap_err()
-            .contains("not an XRecord"));
-
-        // Delete removes exactly the named record and returns its content.
-        let removed = host.delete_xrecord(&["CVIFC"], "beta").unwrap();
-        assert_eq!(removed.handle, beta);
-        assert_eq!(removed.entries, entries());
-        assert_eq!(
-            host.list_xrecords(&["CVIFC"]).unwrap(),
-            vec!["alpha".to_owned()]
-        );
-        assert!(host
-            .read_xrecord(&["CVIFC"], "beta")
-            .unwrap_err()
-            .contains("does not exist"));
-        assert!(host.delete_xrecord(&["CVIFC"], "beta").is_err());
-    }
-
-    #[test]
-    fn xrecord_mutations_are_single_undo_steps_that_restore_objects() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let original_entries = || vec![codec::objects::XRecordEntry::string(1, "one")];
-        let changed_entries = || {
-            vec![
-                codec::objects::XRecordEntry::string(1, "changed"),
-                codec::objects::XRecordEntry::int16(70, 9),
-            ]
-        };
-        let (alpha, beta);
-        {
-            let mut host = HostSession::new(&mut app, 0);
-            alpha = host
-                .create_xrecord(&["CVIFC"], "alpha", original_entries())
-                .unwrap();
-            beta = host
-                .create_xrecord(&["CVIFC"], "beta", original_entries())
-                .unwrap();
-            // Refusals record no undo step.
-            assert!(host
-                .create_xrecord(&["CVIFC"], "alpha", original_entries())
-                .is_err());
-            assert!(host
-                .update_xrecord(&["CVIFC"], "gamma", original_entries())
-                .is_err());
-            host.update_xrecord(&["CVIFC"], "alpha", changed_entries())
-                .unwrap();
-            let removed = host.delete_xrecord(&["CVIFC"], "beta").unwrap();
-            assert_eq!(removed.handle, beta);
-        }
-        app.finish_pending_history(0);
-        // Four mutating calls = four undo steps; the refusals recorded none.
-        assert_eq!(app.tabs[0].history.undo_stack.len(), 4);
-
-        let xrecord = |doc: &CadDocument, handle: Handle| -> Option<codec::objects::XRecord> {
-            match doc.objects.get(&handle) {
-                Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
-                _ => None,
-            }
-        };
-        let has_dictionary_entry = |doc: &CadDocument, name: &str| -> bool {
-            let root = doc.header.named_objects_dict_handle;
-            match doc.objects.get(&root) {
-                Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
-                    .entries
-                    .iter()
-                    .any(|(key, _)| key.eq_ignore_ascii_case(name)),
-                _ => false,
-            }
-        };
-
-        // Undo the delete: beta is back with its exact prior entries.
-        app.undo_steps(1);
-        let document = &app.tabs[0].scene.document;
-        assert_eq!(xrecord(document, beta).unwrap().entries, original_entries());
-        // Undo the update: alpha's entries are restored byte-exactly.
-        app.undo_steps(1);
-        let document = &app.tabs[0].scene.document;
-        assert_eq!(
-            xrecord(document, alpha).unwrap().entries,
-            original_entries()
-        );
-        // Undo beta's creation.
-        app.undo_steps(1);
-        let document = &app.tabs[0].scene.document;
-        assert!(xrecord(document, beta).is_none());
-        assert!(xrecord(document, alpha).is_some());
-        // Undo alpha's creation: the auto-created dictionary went with it,
-        // because the pending history snapshot restores the whole objects map.
-        app.undo_steps(1);
-        let document = &app.tabs[0].scene.document;
-        assert!(xrecord(document, alpha).is_none());
-        assert!(
-            !has_dictionary_entry(document, "CVIFC"),
-            "undoing the first create removed the auto-created dictionary"
-        );
-        // Redo re-applies the whole ladder.
-        app.redo_steps(4);
-        let document = &app.tabs[0].scene.document;
-        assert_eq!(xrecord(document, alpha).unwrap().entries, changed_entries());
-        assert!(xrecord(document, beta).is_none());
-    }
-
-    /// The entity-write composition contract, for XRecords: a plugin opens one
-    /// `push_undo` scope per operation and performs every write — XRecord and
-    /// entity, plus refusals — inside it, and the finished scope is a single
-    /// undo step under the plugin's own label that restores (and re-applies)
-    /// the whole operation at once.
-    #[test]
-    fn xrecord_writes_join_a_plugin_initiated_undo_scope() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let original_entries = || vec![codec::objects::XRecordEntry::string(1, "one")];
-        let changed_entries = || {
-            vec![
-                codec::objects::XRecordEntry::string(1, "changed"),
-                codec::objects::XRecordEntry::int16(70, 9),
-            ]
-        };
-        let (alpha, nested, entity);
-        {
-            let mut host = HostSession::new(&mut app, 0);
-            host.push_undo("CVI: import");
-            alpha = host
-                .create_xrecord(&["CVIFC"], "alpha", original_entries())
-                .unwrap();
-            nested = host
-                .create_xrecord(&["CVIFC", "LAYOUTS"], "nested", original_entries())
-                .unwrap();
-            // A refusal inside the scope records nothing at all.
-            assert!(host
-                .create_xrecord(&["CVIFC"], "ALPHA", original_entries())
-                .is_err());
-            assert_eq!(
-                host.update_xrecord(&["CVIFC"], "alpha", changed_entries())
-                    .unwrap(),
-                alpha
-            );
-            let beta = host
-                .create_xrecord(&["CVIFC"], "beta", original_entries())
-                .unwrap();
-            let removed = host.delete_xrecord(&["CVIFC"], "beta").unwrap();
-            assert_eq!(removed.handle, beta);
-            // Entity writes join the same scope and land in the same step.
-            entity = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
-                3.0, 0.0, 0.0,
-            ))));
-        }
-        app.finish_pending_history(0);
-        // The whole plugin operation is ONE undo step under the plugin's label.
-        assert_eq!(app.tabs[0].history.undo_stack.len(), 1);
-        assert_eq!(app.tabs[0].history.undo_stack[0].label(), "CVI: import");
-
-        let xrecord = |doc: &CadDocument, handle: Handle| -> Option<codec::objects::XRecord> {
-            match doc.objects.get(&handle) {
-                Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
-                _ => None,
-            }
-        };
-        let has_dictionary_entry = |doc: &CadDocument, name: &str| -> bool {
-            let root = doc.header.named_objects_dict_handle;
-            match doc.objects.get(&root) {
-                Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
-                    .entries
-                    .iter()
-                    .any(|(key, _)| key.eq_ignore_ascii_case(name)),
-                _ => false,
-            }
-        };
-
-        app.undo_steps(1);
-        let document = &app.tabs[0].scene.document;
-        assert!(document.get_entity(entity).is_none());
-        assert!(xrecord(document, alpha).is_none());
-        assert!(xrecord(document, nested).is_none());
-        assert!(
-            !has_dictionary_entry(document, "CVIFC"),
-            "undoing the operation removed its auto-created dictionary namespace"
-        );
-        app.redo_steps(1);
-        let document = &app.tabs[0].scene.document;
-        assert!(matches!(
-            document.get_entity(entity),
-            Some(EntityType::Point(_))
-        ));
-        let alpha_record = xrecord(document, alpha).unwrap();
-        assert_eq!(alpha_record.entries, changed_entries());
-        assert!(xrecord(document, nested).is_some());
-        assert!(
-            has_dictionary_entry(document, "CVIFC"),
-            "redoing the operation re-seeded its namespace"
-        );
-    }
-
-    #[test]
-    fn xrecords_survive_dxf_and_dwg_round_trips() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        let entries = || {
-            vec![
-                codec::objects::XRecordEntry::string(1, "{\"k\":\"road\",\"s\":1}"),
-                codec::objects::XRecordEntry::double(40, 0.125),
-                codec::objects::XRecordEntry::int16(70, 3),
-                codec::objects::XRecordEntry::int32(90, -45000),
-                codec::objects::XRecordEntry::bool(290, true),
-            ]
-        };
-        // Create carries a first payload, then the update replaces it: if the
-        // writers preferred stale raw bytes over the typed entries, the loaded
-        // record would still read "stale".
-        host.create_xrecord(
-            &["CVIFC", "RECORDS"],
-            "alpha",
-            vec![codec::objects::XRecordEntry::string(1, "stale")],
-        )
-        .unwrap();
-        host.update_xrecord(&["CVIFC", "RECORDS"], "alpha", entries())
-            .unwrap();
-
-        let find_xrecord =
-            |doc: &CadDocument, path: &[&str], name: &str| -> Option<codec::objects::XRecord> {
-                let mut current = doc.header.named_objects_dict_handle;
-                for fragment in path {
-                    match doc.objects.get(&current) {
-                        Some(codec::objects::ObjectType::Dictionary(dictionary)) => {
-                            current = dictionary.get(fragment)?
-                        }
-                        _ => return None,
-                    }
-                }
-                let Some(codec::objects::ObjectType::Dictionary(dictionary)) =
-                    doc.objects.get(&current)
-                else {
-                    return None;
-                };
-                let handle = dictionary.get(name)?;
-                match doc.objects.get(&handle) {
-                    Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
-                    _ => None,
-                }
-            };
-
-        let dwg = crate::io::load_bytes(
-            "xrec.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
-        )
-        .unwrap();
-        let reloaded = find_xrecord(&dwg, &["CVIFC", "RECORDS"], "alpha")
-            .expect("XRecord in the reloaded DWG");
-        assert_eq!(reloaded.entries, entries());
-
-        let dxf = crate::io::load_bytes(
-            "xrec.dxf",
-            codec::DxfWriter::new(host.document())
-                .write_to_vec()
-                .unwrap(),
-        )
-        .unwrap();
-        let reloaded = find_xrecord(&dxf, &["CVIFC", "RECORDS"], "alpha")
-            .expect("XRecord in the reloaded DXF");
-        assert_eq!(reloaded.entries, entries());
     }
 
     /// Opt-in end-to-end check using the staged Python cdylib and the actual
@@ -5199,7 +4280,7 @@ mod tests {
         assert!(strokes.iter().any(|stroke| stroke
             .run
             .as_ref()
-            .is_some_and(|run| run.text.contains("PART_NO"))));
+            .is_some_and(|run| run.text.contains("PN-002"))));
 
         for (label, patch, message) in [
             ("Reject tag", "'tag':'BAD TAG'", "whitespace"),
@@ -6708,7 +5789,7 @@ mod tests {
             let EntityType::Dimension(dimension) = &mut after else {
                 unreachable!()
             };
-            if let codec::entities::Dimension::Linear(value) = &mut **dimension {
+            if let codec::entities::Dimension::Linear(value) = dimension {
                 value.second_point.x = 30.0;
             }
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
@@ -7414,7 +6495,7 @@ mod tests {
                 .unwrap();
             let mut viewport = codec::entities::Viewport::new();
             viewport.common.owner_handle = owner;
-            let viewport_handle = host.add_entity(EntityType::Viewport(Box::new(viewport)));
+            let viewport_handle = host.add_entity(EntityType::Viewport(viewport));
             let scale_handle = host.document_mut().allocate_handle();
             let mut scale = codec::objects::Scale::new("1:1", 1.0, 1.0);
             scale.handle = scale_handle;
@@ -8644,8 +7725,12 @@ mod tests {
             expect_created: "PART_NO|Part number|PN-001 ins1.0,2.0 al3.0,4.0 h2.5 r0.25 wf1.25 ob0.10 Center/Top f1010 fl12 tg2 lock1",
             expect_edited: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
             expect_reedited: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
+            // BLOCKER (opencadcodec): the DXF ATTDEF writer emits no group 280 at
+            // all — neither the version byte nor the lock-position flag the
+            // reader looks for after it — so `lock_position` reopens false. Every
+            // other field round-trips since opencadcodec dd1d7bf.
+            expect_edited_dxf: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
+            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock0",
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
         });
@@ -10861,7 +9946,7 @@ mod tests {
         bare.height = 30.0;
         let bare = host
             .document_mut()
-            .add_entity(EntityType::Viewport(Box::new(bare)))
+            .add_entity(EntityType::Viewport(bare))
             .unwrap();
         assert_eq!(
             host.document().get_entity(bare).map(|e| match e {
@@ -12122,9 +11207,6 @@ LT.delete('Temp')
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
-        // The array assertions below check loose copies; ARRAYRECT/ARRAYPOLAR
-        // build associative arrays by default (thread-local, this thread only).
-        crate::modules::draw::defaults::set_array_assoc(0.0);
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
@@ -13478,304 +12560,6 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(!host.update_entity(EntityType::Point(ghost)));
     }
 
-    fn reference_test_line(end_x: f64, y: f64, handle: Handle) -> EntityType {
-        let mut line = codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, y, 0.0),
-            codec::types::Vector3::new(end_x, y, 0.0),
-        );
-        line.common.handle = handle;
-        EntityType::Line(line)
-    }
-
-    #[test]
-    fn reference_only_refusals_record_no_undo_step() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        // Marking an absent entity refuses.
-        assert!(host.set_reference_only(Handle::new(999_999), true).is_err());
-        let handle = host.add_entity(reference_test_line(10.0, 0.0, Handle::NULL));
-        // A locked layer is as unwritable for the designation as for every
-        // other plugin write.
-        host.app.tabs[0]
-            .scene
-            .document
-            .layers
-            .get_mut("0")
-            .map(|layer| layer.lock());
-        assert!(host.set_reference_only(handle, true).is_err());
-        host.app.tabs[0]
-            .scene
-            .document
-            .layers
-            .get_mut("0")
-            .map(|layer| layer.unlock());
-        assert!(
-            !host.app.tabs[0].scene.is_reference_only(handle),
-            "refusals must not partially apply the designation"
-        );
-        assert_eq!(
-            host.app.tabs[0].history.undo_stack.len(),
-            0,
-            "refusals record no undo step"
-        );
-        // An idempotent re-mark succeeds without recording another step.
-        host.set_reference_only(handle, true).unwrap();
-        assert_eq!(host.app.tabs[0].history.undo_stack.len(), 1);
-        host.set_reference_only(handle, true).unwrap();
-        assert_eq!(
-            host.app.tabs[0].history.undo_stack.len(),
-            1,
-            "an idempotent re-mark records no undo step"
-        );
-    }
-
-    #[test]
-    fn reference_only_designation_composes_undo_like_entity_writes() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        let handle = host.add_entity(reference_test_line(10.0, 0.0, Handle::NULL));
-        // A scope-less designation is one undo step of its own.
-        host.set_reference_only(handle, true).unwrap();
-        host.set_reference_only(handle, false).unwrap();
-        assert_eq!(host.app.tabs[0].history.undo_stack.len(), 2);
-
-        // Undo reverts the unmark, redo re-applies it.
-        drop(host);
-        app.undo_steps(1);
-        let host = HostSession::new(&mut app, 0);
-        assert!(host.app.tabs[0].scene.is_reference_only(handle));
-        drop(host);
-        app.redo_steps(1);
-        let mut host = HostSession::new(&mut app, 0);
-        assert!(!host.app.tabs[0].scene.is_reference_only(handle));
-
-        // Inside a plugin-opened push_undo scope the designation joins the
-        // scope: an entity write plus two markings is ONE step under the
-        // plugin's label.
-        host.push_undo("CVI: refresh");
-        let preview = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
-            3.0, 0.0, 0.0,
-        ))));
-        host.set_reference_only(preview, true).unwrap();
-        host.set_reference_only(handle, true).unwrap();
-        drop(host);
-        app.finish_pending_history(0);
-        assert_eq!(app.tabs[0].history.undo_stack.len(), 3);
-        assert_eq!(app.tabs[0].history.undo_stack[2].label(), "CVI: refresh");
-
-        // Undoing the plugin operation reverts it whole.
-        app.undo_steps(1);
-        let host = HostSession::new(&mut app, 0);
-        assert!(
-            host.app.tabs[0]
-                .scene
-                .document
-                .get_entity(preview)
-                .is_none(),
-            "undoing the scope removed the entity created inside it"
-        );
-        assert!(
-            !host.app.tabs[0].scene.is_reference_only(handle),
-            "undoing the scope restored the designation's prior state"
-        );
-    }
-
-    #[test]
-    fn reference_only_designation_is_not_written_to_dwg_or_dxf() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        let handle = host.add_entity(reference_test_line(10.0, 0.0, Handle::NULL));
-        host.set_reference_only(handle, true).unwrap();
-        // The designation lives in the scene's in-memory set only.
-        assert!(host.app.tabs[0].scene.is_reference_only(handle));
-
-        // The host writes nothing of its own into the document: no APPID
-        // registration, no marker XDATA on the designated entity.
-        assert!(host.document().app_ids.get("OCS").is_none());
-        assert!(host
-            .document()
-            .get_entity(handle)
-            .expect("designated entity")
-            .common()
-            .extended_data
-            .get_record("OCS")
-            .is_none());
-
-        let contains_marker =
-            |bytes: &[u8]| bytes.windows(15).any(|window| window == b"REFERENCE_ONLY");
-
-        // DWG: the marker string appears nowhere in the saved bytes, and a
-        // reopened file carries neither the host APPID nor the marker record.
-        let dwg = codec::DwgWriter::write_to_vec(host.document()).unwrap();
-        assert!(
-            !contains_marker(&dwg),
-            "DWG save must not contain the designation marker"
-        );
-        let reloaded = crate::io::load_bytes("reference-only.dwg", dwg).unwrap();
-        assert!(reloaded.app_ids.get("OCS").is_none());
-        assert!(reloaded
-            .get_entity(handle)
-            .expect("the line survives the round trip")
-            .common()
-            .extended_data
-            .get_record("OCS")
-            .is_none());
-        assert!(
-            !contains_marker(&codec::DwgWriter::write_to_vec(&reloaded).unwrap()),
-            "a re-save of the reopened file stays marker-free"
-        );
-
-        // DXF: same contract for the text format.
-        let dxf = codec::DxfWriter::new(host.document())
-            .write_to_vec()
-            .unwrap();
-        assert!(
-            !contains_marker(&dxf),
-            "DXF save must not contain the designation marker"
-        );
-        let reloaded = crate::io::load_bytes("reference-only.dxf", dxf).unwrap();
-        assert!(reloaded.app_ids.get("OCS").is_none());
-        assert!(reloaded
-            .get_entity(handle)
-            .expect("the line survives the round trip")
-            .common()
-            .extended_data
-            .get_record("OCS")
-            .is_none());
-    }
-
-    #[test]
-    fn erasing_a_designated_entity_undoes_designation_with_it() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        let handle = host.add_entity(reference_test_line(10.0, 0.0, Handle::NULL));
-        host.set_reference_only(handle, true).unwrap();
-
-        // The plugin erase path removes a designated entity inside a scope:
-        // entity and set entry leave together.
-        host.push_undo("CVI: replace the underlying model");
-        host.remove_entity(handle);
-        drop(host);
-        app.finish_pending_history(0);
-        let host = HostSession::new(&mut app, 0);
-        assert!(host.app.tabs[0].scene.document.get_entity(handle).is_none());
-        assert!(!host.app.tabs[0].scene.is_reference_only(handle));
-        drop(host);
-
-        // Undoing the erase restores the entity AND its designation: the set
-        // mutation rode the scope as an explicit designation channel.
-        app.undo_steps(1);
-        let host = HostSession::new(&mut app, 0);
-        assert!(
-            host.app.tabs[0].scene.document.get_entity(handle).is_some(),
-            "undo restored the erased entity"
-        );
-        assert!(
-            host.app.tabs[0].scene.is_reference_only(handle),
-            "undo restored the designation together with its entity"
-        );
-    }
-
-    #[test]
-    fn user_paths_refuse_and_plugin_paths_write_reference_only_entities() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        let handle = host.add_entity(reference_test_line(10.0, 0.0, Handle::NULL));
-        host.set_reference_only(handle, true).unwrap();
-        let plain = host.add_entity(reference_test_line(10.0, 5.0, Handle::NULL));
-
-        // Grips: the reference-only entity contributes none; the editable one
-        // keeps its own.
-        host.set_selection(&[handle]).unwrap();
-        host.app.refresh_selected_grips();
-        assert!(
-            host.app.tabs[0].selected_grips.is_empty(),
-            "reference-only entities contribute no grips"
-        );
-        host.set_selection(&[plain]).unwrap();
-        host.app.refresh_selected_grips();
-        assert!(!host.app.tabs[0].selected_grips.is_empty());
-
-        // The user in-place update refuses; the user batch skips only the
-        // reference-only member; the plugin-owned variants write through.
-        assert!(!host.app.tabs[0]
-            .scene
-            .update_entity(reference_test_line(20.0, 0.0, handle)));
-        let applied = host.app.tabs[0].scene.update_entities(vec![
-            reference_test_line(20.0, 0.0, handle),
-            reference_test_line(20.0, 5.0, plain),
-        ]);
-        assert_eq!(
-            applied, 1,
-            "the user batch applies only the editable entity"
-        );
-        let end_x = |scene: &crate::scene::Scene, h: Handle| match scene.document.get_entity(h) {
-            Some(EntityType::Line(line)) => line.end.x,
-            _ => panic!("entity {h:?} must be a line"),
-        };
-        let scene = &host.app.tabs[0].scene;
-        assert_eq!(
-            end_x(scene, handle),
-            10.0,
-            "the user paths refused the write"
-        );
-        assert_eq!(end_x(scene, plain), 20.0);
-        // The plugin-owned variant writes through. A real plugin refresh
-        // clones the live entity (designation included), edits it, and
-        // replaces it — so model that flow instead of a bare synthetic.
-        let mut moved = match host.app.tabs[0].scene.document.get_entity(handle) {
-            Some(entity) => entity.clone(),
-            _ => unreachable!("the entity exists"),
-        };
-        if let EntityType::Line(line) = &mut moved {
-            line.end.x = 30.0;
-        }
-        assert!(host.app.tabs[0].scene.update_entity_plugin(moved));
-        let scene = &host.app.tabs[0].scene;
-        assert_eq!(
-            end_x(scene, handle),
-            30.0,
-            "the plugin-owned update writes through"
-        );
-        assert!(
-            scene.is_reference_only(handle),
-            "a refresh-style plugin write preserves the designation"
-        );
-
-        // User erase skips reference-only entities; the plugin erase path
-        // removes them.
-        host.app.tabs[0].scene.erase_entities(&[handle]);
-        assert!(
-            host.app.tabs[0].scene.document.get_entity(handle).is_some(),
-            "user erase skips reference-only entities"
-        );
-        host.app.tabs[0].scene.erase_entities_plugin(&[handle]);
-        assert!(
-            host.app.tabs[0].scene.document.get_entity(handle).is_none(),
-            "the plugin erase path removes reference-only entities"
-        );
-        assert!(host.app.tabs[0].scene.document.get_entity(plain).is_some());
-    }
-
-    #[test]
-    fn select_all_visible_skips_reference_only_entities() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let mut host = HostSession::new(&mut app, 0);
-        let handle = host.add_entity(reference_test_line(10.0, 0.0, Handle::NULL));
-        host.set_reference_only(handle, true).unwrap();
-        let plain = host.add_entity(reference_test_line(10.0, 5.0, Handle::NULL));
-
-        assert_eq!(host.app.tabs[0].scene.select_all_visible(), 1);
-        let selected = host.app.tabs[0].scene.selected_handles_in_order();
-        assert_eq!(selected, vec![plain]);
-    }
-
     #[test]
     fn add_and_update_auto_register_novel_layers_with_real_handles() {
         // A plugin adds/edits an entity naming a layer no LAYER command ever
@@ -13834,194 +12618,6 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         // Removing an already-gone handle reports false.
         assert!(!host.remove_entity(h));
-    }
-
-    #[test]
-    fn update_entity_refreshes_selected_grips() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let handle = {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
-            let handle = host.add_entity(EntityType::Line(line));
-            host.set_selection(&[handle]).unwrap();
-            handle
-        };
-        // A real selection event rebuilt the grip cache the way the app's
-        // own paths do.
-        app.refresh_selected_grips();
-        assert_eq!(app.tabs[0].selected_grips.len(), 3);
-        assert_eq!(
-            app.tabs[0]
-                .selected_grips
-                .iter()
-                .map(|grip| grip.world)
-                .collect::<Vec<_>>(),
-            vec![
-                glam::DVec3::new(1.0, 1.0, 0.0),
-                glam::DVec3::new(3.0, 1.0, 0.0),
-                glam::DVec3::new(2.0, 1.0, 0.0),
-            ]
-        );
-        {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut edited = host.document().get_entity(handle).cloned().unwrap();
-            if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(101.0, 1.0, 0.0);
-                line.end = codec::types::Vector3::new(103.0, 1.0, 0.0);
-            }
-            assert!(host.update_entity(edited));
-        }
-        // The cached grip markers must sit on the refreshed geometry, not at
-        // their pre-edit positions.
-        assert_eq!(
-            app.tabs[0]
-                .selected_grips
-                .iter()
-                .map(|grip| grip.world)
-                .collect::<Vec<_>>(),
-            vec![
-                glam::DVec3::new(101.0, 1.0, 0.0),
-                glam::DVec3::new(103.0, 1.0, 0.0),
-                glam::DVec3::new(102.0, 1.0, 0.0),
-            ]
-        );
-    }
-
-    #[test]
-    fn update_entities_transaction_refreshes_selected_grips() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let handle = {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(0.0, 0.0, 0.0);
-            line.end = codec::types::Vector3::new(2.0, 0.0, 0.0);
-            let handle = host.add_entity(EntityType::Line(line));
-            host.set_selection(&[handle]).unwrap();
-            handle
-        };
-        app.refresh_selected_grips();
-        assert_eq!(app.tabs[0].selected_grips.len(), 3);
-        {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut edited = host.document().get_entity(handle).cloned().unwrap();
-            if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(50.0, 0.0, 0.0);
-                line.end = codec::types::Vector3::new(52.0, 0.0, 0.0);
-            }
-            host.update_entities_transaction("Move line", vec![edited])
-                .unwrap();
-        }
-        app.finish_pending_history(0);
-        assert_eq!(
-            app.tabs[0]
-                .selected_grips
-                .iter()
-                .map(|grip| grip.world)
-                .collect::<Vec<_>>(),
-            vec![
-                glam::DVec3::new(50.0, 0.0, 0.0),
-                glam::DVec3::new(52.0, 0.0, 0.0),
-                glam::DVec3::new(51.0, 0.0, 0.0),
-            ]
-        );
-    }
-
-    #[test]
-    fn remove_entity_clears_selected_grips_of_removed_entity() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let handle = {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
-            let handle = host.add_entity(EntityType::Line(line));
-            host.set_selection(&[handle]).unwrap();
-            handle
-        };
-        app.refresh_selected_grips();
-        assert_eq!(app.tabs[0].selected_grips.len(), 3);
-        {
-            let mut host = HostSession::new(&mut app, 0);
-            assert!(host.remove_entity(handle));
-        }
-        // Erase deselects the handle; the grip cache must drop the markers
-        // of the removed entity instead of keeping them until the next
-        // selection event.
-        assert!(app.tabs[0].selected_grips.is_empty());
-    }
-
-    #[test]
-    fn update_entity_without_selection_keeps_grip_cache_empty() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let handle = {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
-            host.add_entity(EntityType::Line(line))
-        };
-        app.refresh_selected_grips();
-        assert!(app.tabs[0].selected_grips.is_empty());
-        {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut edited = host.document().get_entity(handle).cloned().unwrap();
-            if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(10.0, 1.0, 0.0);
-            }
-            // Still succeeds; nothing was selected, so no panic, no phantom
-            // grips.
-            assert!(host.update_entity(edited));
-        }
-        assert!(app.tabs[0].selected_grips.is_empty());
-    }
-
-    #[test]
-    fn background_tab_update_leaves_active_grips_untouched() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.tabs[0].is_start = false;
-        let _handle = {
-            let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
-            let handle = host.add_entity(EntityType::Line(line));
-            host.set_selection(&[handle]).unwrap();
-            handle
-        };
-        app.refresh_selected_grips();
-        assert_eq!(app.tabs[0].selected_grips.len(), 3);
-        // Mark one cached grip so an accidental refresh (which would rebuild
-        // it from the active tab's unchanged scene) is observable.
-        app.tabs[0].selected_grips[0].world = glam::DVec3::new(999.0, 999.0, 0.0);
-        // A second document tab is background while tab 0 stays active.
-        app.push_test_document();
-        assert_eq!(app.active_tab, 0);
-        {
-            let mut host = HostSession::new(&mut app, 1);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(100.0, 100.0, 0.0);
-            line.end = codec::types::Vector3::new(102.0, 100.0, 0.0);
-            let background = host.add_entity(EntityType::Line(line));
-            host.set_selection(&[background]).unwrap();
-            let mut edited = host.document().get_entity(background).cloned().unwrap();
-            if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(200.0, 100.0, 0.0);
-            }
-            assert!(host.update_entity(edited));
-        }
-        // The background-tab session neither refreshed nor disturbed the
-        // active tab's cached grips.
-        assert_eq!(
-            app.tabs[0].selected_grips[0].world,
-            glam::DVec3::new(999.0, 999.0, 0.0)
-        );
-        assert_eq!(app.tabs[0].selected_grips.len(), 3);
     }
 
     /// A plugin command: second point commits a Point and ends.

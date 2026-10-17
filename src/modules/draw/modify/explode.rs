@@ -98,11 +98,20 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
         {
             vec![]
         }
-        EntityType::Insert(ins) => ins
-            .explode_from_document(document)
-            .into_iter()
-            .map(normalize_insert_entity)
-            .collect(),
+        EntityType::Insert(ins) => {
+            let explodable = document
+                .block_records
+                .get(&ins.block_name)
+                .map_or(true, |br| br.explodable);
+            if !explodable {
+                vec![]
+            } else {
+                ins.explode_from_document(document)
+                    .into_iter()
+                    .map(normalize_insert_entity)
+                    .collect()
+            }
+        }
         EntityType::MLine(ml) => explode_mline(ml),
         EntityType::Dimension(dim) => explode_dimension(dim, document),
         EntityType::MText(t) => crate::entities::mtext::explode_mtext(t, document),
@@ -860,10 +869,6 @@ fn dim_common(
 ) -> codec::entities::EntityCommon {
     let mut c = base.clone();
     c.handle = Handle::NULL;
-    // A baked child must not claim its dimension's extension dictionary:
-    // xdict ownership is exclusive, and a second claimant fails file
-    // validation with "Extension dictionary <H> Cannot access".
-    c.xdictionary_handle = None;
     if clr != 0 && clr != 256 {
         c.color = codec::types::Color::from_index(clr);
         c.color_name = None;
@@ -1410,9 +1415,6 @@ fn explode_dimension(dim: &Dimension, doc: &CadDocument) -> Vec<EntityType> {
         tent.common_mut().color_name = tc.color_name;
         tent.common_mut().color_book_handle = tc.color_book_handle;
         tent.common_mut().line_weight = tc.line_weight;
-        // The live-render text entity carries the dimension's dictionary;
-        // the baked copy must not share it (see above).
-        tent.common_mut().xdictionary_handle = None;
         result.push(tent);
     }
 
@@ -1439,7 +1441,7 @@ fn sync_dimension_base_points_and_collect_pending(doc: &mut CadDocument) -> Vec<
             let EntityType::Dimension(dimension) = entity else {
                 return None;
             };
-            let definition_point = match &**dimension {
+            let definition_point = match dimension {
                 Dimension::Linear(value) => Some(value.definition_point),
                 Dimension::Aligned(value) => Some(value.definition_point),
                 Dimension::Radius(value) => Some(value.definition_point),
@@ -1493,7 +1495,7 @@ pub fn bake_dimension_blocks(doc: &mut CadDocument) {
     let dimensions: Vec<(Handle, Dimension)> = pending
         .into_iter()
         .filter_map(|handle| match doc.get_entity(handle) {
-            Some(EntityType::Dimension(d)) => Some((handle, (**d).clone())),
+            Some(EntityType::Dimension(d)) => Some((handle, d.clone())),
             _ => None,
         })
         .collect();
@@ -1630,87 +1632,6 @@ mod tests {
         assert!(explode_entity(&EntityType::Insert(insert), &doc).is_empty());
     }
 
-    /// EXPLODE resolves ByBlock transparency and linetype on the children it
-    /// produces, the same way the render path does, so an exploded entity does
-    /// not keep a ByBlock sentinel that nothing downstream resolves.
-    #[test]
-    fn explode_resolves_byblock_transparency_and_linetype() {
-        let mut doc = CadDocument::new();
-
-        let mut block = BlockRecord::new("BYBLOCK_STYLE");
-        block.handle = doc.allocate_handle();
-
-        let mut child = codec::entities::Line::from_points(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        );
-        child.common.color = codec::types::Color::ByBlock;
-        child.common.transparency = codec::types::Transparency::ByBlock;
-        child.common.linetype = "ByBlock".to_string();
-        let child_handle = doc.add_entity(EntityType::Line(child)).unwrap();
-        block.entity_handles.push(child_handle);
-        doc.block_records.add(block).unwrap();
-
-        let mut insert = codec::entities::Insert::new("BYBLOCK_STYLE", Vector3::new(0.0, 0.0, 0.0));
-        insert.common.color = codec::types::Color::from_index(1);
-        insert.common.transparency = codec::types::Transparency::new(96);
-        insert.common.linetype = "DASHED".to_string();
-
-        let out = explode_entity(&EntityType::Insert(insert), &doc);
-        assert_eq!(out.len(), 1, "the block's one child should come out");
-
-        let c = out[0].common();
-        assert_eq!(c.color, codec::types::Color::from_index(1));
-        assert_eq!(
-            c.transparency,
-            codec::types::Transparency::new(96),
-            "ByBlock transparency should take the insert's value"
-        );
-        assert_eq!(
-            c.linetype, "DASHED",
-            "ByBlock linetype should take the insert's linetype"
-        );
-    }
-
-    /// A child that already names its own transparency/linetype keeps them;
-    /// only the ByBlock sentinel is replaced.
-    #[test]
-    fn explode_keeps_explicit_child_transparency_and_linetype() {
-        let mut doc = CadDocument::new();
-
-        let mut block = BlockRecord::new("EXPLICIT_STYLE");
-        block.handle = doc.allocate_handle();
-
-        let mut child = codec::entities::Line::from_points(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        );
-        child.common.transparency = codec::types::Transparency::new(25);
-        child.common.linetype = "CONTINUOUS".to_string();
-        let child_handle = doc.add_entity(EntityType::Line(child)).unwrap();
-        block.entity_handles.push(child_handle);
-        doc.block_records.add(block).unwrap();
-
-        let mut insert =
-            codec::entities::Insert::new("EXPLICIT_STYLE", Vector3::new(0.0, 0.0, 0.0));
-        insert.common.transparency = codec::types::Transparency::new(96);
-        insert.common.linetype = "DASHED".to_string();
-
-        let out = explode_entity(&EntityType::Insert(insert), &doc);
-        assert_eq!(out.len(), 1);
-
-        let c = out[0].common();
-        assert_eq!(
-            c.transparency,
-            codec::types::Transparency::new(25),
-            "an explicit child transparency must survive"
-        );
-        assert_eq!(
-            c.linetype, "CONTINUOUS",
-            "an explicit child linetype must survive"
-        );
-    }
-
     #[test]
     fn unexplodable_block_is_not_exploded() {
         let mut doc = CadDocument::new();
@@ -1735,7 +1656,7 @@ mod tests {
         d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
         // block_name is left empty — exactly what OCS-created dimensions carry.
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
             .unwrap();
 
         bake_dimension_blocks(&mut doc);
@@ -1774,7 +1695,7 @@ mod tests {
         // Exactly what OCS-created dimensions carry: insertion == text anchor.
         d.base.insertion_point = d.base.text_middle_point;
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
             .unwrap();
 
         bake_dimension_blocks(&mut doc);
@@ -1801,7 +1722,7 @@ mod tests {
         d.definition_point = Vector3::new(0.0, 5.0, 0.0);
         d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
             .unwrap();
 
         bake_dimension_blocks(&mut doc);
@@ -1879,7 +1800,7 @@ mod tests {
         d.rotation = 0.0;
         d.definition_point = Vector3::new(0.0, 8.0, 0.0);
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
             .unwrap();
         bake_dimension_blocks(&mut doc);
         let name = match doc.get_entity(handle) {
@@ -1908,7 +1829,7 @@ mod tests {
         let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
         d.definition_point = Vector3::new(0.0, 5.0, 0.0);
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
             .unwrap();
         bake_dimension_blocks(&mut doc);
         let name = match doc.get_entity(handle) {
@@ -1956,7 +1877,7 @@ mod tests {
             .collect();
         assert!(!expected.is_empty(), "the dimension explodes into no lines");
 
-        let mut turned = EntityType::Dimension(Box::new(flat));
+        let mut turned = EntityType::Dimension(flat);
         crate::scene::view::dispatch::apply_transform(
             &mut turned,
             &EntityTransform::Rotate {
@@ -1992,7 +1913,7 @@ mod tests {
         );
         d.definition_point = Vector3::new(5.0, 5.0, 0.0); // arc location
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Angular3Pt(d))))
+            .add_entity(EntityType::Dimension(Dimension::Angular3Pt(d)))
             .unwrap();
         bake_dimension_blocks(&mut doc);
         let name = match doc.get_entity(handle) {
@@ -2021,7 +1942,7 @@ mod tests {
         let mut d = DimensionDiameter::new(edge, far);
         d.base.text_middle_point = Vector3::new(3.0, 9.0, 0.0);
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Diameter(d))))
+            .add_entity(EntityType::Dimension(Dimension::Diameter(d)))
             .unwrap();
         bake_dimension_blocks(&mut doc);
         let name = match doc.get_entity(handle) {
@@ -2052,7 +1973,7 @@ mod tests {
         d.rotation = std::f64::consts::FRAC_PI_2; // 90°, vertical dimension line
         d.definition_point = Vector3::new(8.0, 0.0, 0.0);
         let handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
             .unwrap();
         bake_dimension_blocks(&mut doc);
         let name = match doc.get_entity(handle) {
@@ -2145,7 +2066,7 @@ mod tests {
                 DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
             d.definition_point = Vector3::new(0.0, 5.0, 0.0);
             d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
-            doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            doc.add_entity(EntityType::Dimension(Dimension::Linear(d)))
                 .unwrap();
 
             let path =
@@ -2202,95 +2123,5 @@ mod tests {
             "round-trip failures:\n{}",
             failures.join("\n")
         );
-    }
-
-    /// No extension dictionary may be referenced by more than one entity.
-    /// Shared xdict ownership fails file validation as
-    /// "Extension dictionary <H> Cannot access".
-    fn assert_no_shared_xdicts(doc: &CadDocument) {
-        use std::collections::HashMap;
-        let mut owners: HashMap<codec::Handle, usize> = HashMap::new();
-        for entity in doc.entities() {
-            if let Some(xd) = entity.common().xdictionary_handle {
-                if !xd.is_null() {
-                    *owners.entry(xd).or_default() += 1;
-                }
-            }
-        }
-        let shared: Vec<_> = owners
-            .iter()
-            .filter(|(_, &n)| n > 1)
-            .map(|(h, n)| format!("{h:?} x{n}"))
-            .collect();
-        assert!(
-            shared.is_empty(),
-            "shared extension dictionaries: {}",
-            shared.join(", ")
-        );
-    }
-
-    /// Baked dimension children must not share the dimension's extension
-    /// dictionary. `dim_common` used to clone the dimension's full common
-    /// block (including `xdictionary_handle`) onto every baked child, so an
-    /// R2000 save of a drawing with N such children failed audit
-    /// with exactly N "Cannot access" errors.
-    #[test]
-    fn baked_children_do_not_share_dimension_xdict() {
-        let mut doc = CadDocument::new();
-
-        // Made-up dictionary object for the dimension to own.
-        let dict_handle = doc.allocate_handle();
-        let mut dict = codec::objects::Dictionary::new();
-        dict.handle = dict_handle;
-        doc.objects
-            .insert(dict_handle, codec::objects::ObjectType::Dictionary(dict));
-
-        // Blockless dimension carrying that dictionary, as a file-read
-        // dimension with an extension dictionary would.
-        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
-        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
-        d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
-        d.base.common.xdictionary_handle = Some(dict_handle);
-        let dim_handle = doc
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
-            .unwrap();
-
-        bake_dimension_blocks(&mut doc);
-
-        let block_name = match doc.get_entity(dim_handle) {
-            Some(EntityType::Dimension(d)) => d.base().block_name.clone(),
-            _ => panic!("dimension missing"),
-        };
-        let owned: Vec<Handle> = doc
-            .block_records
-            .get(&block_name)
-            .unwrap()
-            .entity_handles
-            .clone();
-        assert!(
-            !owned.is_empty(),
-            "baked block should own sub-entities for the invariant to mean anything"
-        );
-        // (a) no shared dictionary anywhere in the document.
-        assert_no_shared_xdicts(&doc);
-        // (b) the dimension keeps its dictionary.
-        match doc.get_entity(dim_handle) {
-            Some(EntityType::Dimension(d)) => assert_eq!(
-                d.base().common.xdictionary_handle,
-                Some(dict_handle),
-                "the dimension must keep its own dictionary"
-            ),
-            _ => panic!("dimension missing"),
-        }
-        // (c) the baked children carry none.
-        for h in &owned {
-            match doc.get_entity(*h) {
-                Some(e) => assert!(
-                    e.common().xdictionary_handle.is_none(),
-                    "baked child {h:?} must not carry an extension dictionary"
-                ),
-                None => panic!("baked child {h:?} missing"),
-            }
-        }
     }
 }

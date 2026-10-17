@@ -66,46 +66,6 @@ impl OpenCADStudio {
         None
     }
 
-    /// ARRAYRECT / ARRAYPOLAR with Associative on: the objects become the
-    /// source of an associative array, in one undo step.
-    pub(super) fn handle_assoc_array(
-        &mut self,
-        mut handles: Vec<Handle>,
-        spec: crate::scene::assoc_array::AssocArraySpec,
-    ) {
-        let i = self.active_tab;
-        handles.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
-        self.tabs[i].scene.clear_preview_wire();
-        self.tabs[i].active_cmd = None;
-        self.tabs[i].snap_result = None;
-        self.restore_pre_cmd_tangent();
-        if handles.is_empty() {
-            return;
-        }
-        let label = self.history_label_from_active_cmd(i, "ARRAY");
-        let source_point = crate::app::helpers::entities_lower_left_by_bbox(
-            &self.tabs[i].scene.document,
-            &handles,
-        );
-        self.push_undo_snapshot(i, label.clone());
-        match crate::scene::assoc_array::create_from_spec(
-            &mut self.tabs[i].scene,
-            &handles,
-            source_point,
-            &spec,
-        ) {
-            Ok(array) => {
-                self.tabs[i].scene.deselect_all();
-                self.tabs[i].scene.select_entity(array, false);
-                self.command_line
-                    .push_output(crate::tf!("{label}: associative array created.").as_ref());
-            }
-            Err(error) => self.command_line.push_error(&format!("{label}: {error}")),
-        }
-        self.tabs[i].dirty = true;
-        self.refresh_properties();
-    }
-
     pub(super) fn handle_replace_many(
         &mut self,
         replacements: Vec<(Handle, Vec<codec::EntityType>)>,
@@ -301,13 +261,10 @@ impl OpenCADStudio {
             return;
         }
         let blocks = self.clipboard_deps.blocks.clone();
-        let document = &mut self.tabs[i].scene.document;
-        merge_app_ids(document, &self.clipboard_deps);
-        let apps = eed_app_map(document, &self.clipboard_deps);
         // Single shared copy — see `merge_block_defs`. One batched geometry
         // rebuild instead of one per definition; same end state as the
         // per-definition bumps `Scene::define_block_raw` used to run.
-        if merge_block_defs(document, &blocks, &apps) > 0 {
+        if merge_block_defs(&mut self.tabs[i].scene.document, &blocks) > 0 {
             self.tabs[i].scene.bump_geometry();
         }
     }
@@ -379,21 +336,6 @@ impl OpenCADStudio {
         for &handle in &by_index {
             if handle.is_null() {
                 continue;
-            }
-            // `add_entity` seeds fill and raster models; the document-level
-            // add above does not, so a pasted hatch without an association
-            // to rebuild it was never drawn. (#1807)
-            if matches!(
-                self.tabs[i].scene.document.get_entity(handle),
-                Some(
-                    codec::EntityType::Hatch(_)
-                        | codec::EntityType::Solid(_)
-                        | codec::EntityType::RasterImage(_)
-                        | codec::EntityType::Ole2Frame(_)
-                        | codec::EntityType::Underlay(_)
-                )
-            ) {
-                self.tabs[i].scene.reseed_derived_caches(handle);
             }
             if matches!(
                 self.tabs[i].scene.document.get_entity(handle),
@@ -472,9 +414,8 @@ impl OpenCADStudio {
         }
         let captures = self.clipboard_deps.ext_objects.clone();
         let doc = &mut self.tabs[i].scene.document;
-        let records = block_record_map(doc, &self.clipboard_deps.blocks);
         for cap in &captures {
-            if let Some(new_root) = recreate_ext_subtree(doc, cap, None, &records) {
+            if let Some(new_root) = recreate_ext_subtree(doc, cap, None) {
                 out.insert(cap.entity_index, new_root);
             }
         }
@@ -518,51 +459,6 @@ pub(crate) fn merge_table_records(doc: &mut codec::CadDocument, deps: &crate::ap
             let _ = doc.dim_styles.add(r);
         }
     }
-    merge_app_ids(doc, deps);
-}
-
-/// Register the copied XDATA's applications this drawing lacks.
-pub(crate) fn merge_app_ids(doc: &mut codec::CadDocument, deps: &crate::app::ClipboardDeps) {
-    for rec in &deps.app_ids {
-        if !doc.app_ids.contains(&rec.name) {
-            let mut r = rec.clone();
-            r.handle = doc.allocate_handle();
-            let _ = doc.app_ids.add(r);
-        }
-    }
-}
-
-/// Source APPID handle → this drawing's APPID of the same name, for the
-/// copied XDATA. Run after [`merge_app_ids`].
-pub(crate) fn eed_app_map(
-    doc: &codec::CadDocument,
-    deps: &crate::app::ClipboardDeps,
-) -> rustc_hash::FxHashMap<u64, u64> {
-    deps.app_ids
-        .iter()
-        .filter_map(|a| Some((a.handle.value(), doc.app_ids.get(&a.name)?.handle.value())))
-        .collect()
-}
-
-/// Re-point a copied entity's verbatim EED at this drawing's APPIDs. A block
-/// whose application the map does not know names no APPID here, and a DWG
-/// carrying one is rejected outright by the reference program, so it goes.
-pub(crate) fn remap_eed_apps(entity: &mut codec::EntityType, apps: &rustc_hash::FxHashMap<u64, u64>) {
-    let remap = |xdata: &mut codec::xdata::ExtendedData| {
-        xdata.raw_dwg_eed.retain_mut(|(app, _)| match apps.get(app) {
-            Some(&target) => {
-                *app = target;
-                true
-            }
-            None => false,
-        });
-    };
-    remap(&mut entity.common_mut().extended_data);
-    if let codec::EntityType::Insert(insert) = entity {
-        for attribute in &mut insert.attributes {
-            remap(&mut attribute.common.extended_data);
-        }
-    }
 }
 
 /// Recreate block definitions the pasted INSERTs reference but the target
@@ -572,62 +468,14 @@ pub(crate) fn remap_eed_apps(entity: &mut codec::EntityType, apps: &rustc_hash::
 pub(crate) fn merge_block_defs(
     doc: &mut codec::CadDocument,
     blocks: &[crate::app::BlockDef],
-    apps: &rustc_hash::FxHashMap<u64, u64>,
 ) -> usize {
-    let mut created = Vec::new();
+    let mut created = 0;
     for def in blocks {
         let before = doc.block_records.len();
-        let mut entities = def.entities.clone();
-        for entity in &mut entities {
-            remap_eed_apps(entity, apps);
-        }
-        define_block_raw_doc(doc, &def.name, def.base_point, &entities);
-        if doc.block_records.len() > before {
-            created.push(def);
-        }
+        define_block_raw_doc(doc, &def.name, def.base_point, &def.entities);
+        created += usize::from(doc.block_records.len() > before);
     }
-    // Graphs name other records (an evaluated copy names its definition), so
-    // they go in once every record exists.
-    let records = block_record_map(doc, blocks);
-    for def in &created {
-        import_block_def_graph(doc, def, &records);
-    }
-    created.len()
-}
-
-/// Source record → this drawing's record of the same name, per definition.
-pub(crate) fn block_record_map(
-    doc: &codec::CadDocument,
-    blocks: &[crate::app::BlockDef],
-) -> std::collections::HashMap<Handle, Handle> {
-    blocks
-        .iter()
-        .filter_map(|def| Some((def.source, doc.block_records.get(&def.name)?.handle)))
-        .collect()
-}
-
-/// Carry `def`'s object graph (a dynamic block's parameters and states) onto
-/// the record just defined from it here. `records` maps the source records
-/// the graph may name.
-pub(crate) fn import_block_def_graph(
-    doc: &mut codec::CadDocument,
-    def: &crate::app::BlockDef,
-    records: &std::collections::HashMap<Handle, Handle>,
-) {
-    let Some(graph) = &def.graph else {
-        return;
-    };
-    let Some(record) = doc.block_records.get(&def.name).map(|record| record.handle) else {
-        return;
-    };
-    let members = crate::scene::block_authoring::members(doc, record);
-    if members.len() != def.entities.len() {
-        return;
-    }
-    let mut map = records.clone();
-    map.extend(def.entities.iter().map(|e| e.common().handle).zip(members));
-    doc.import_block_graph(graph, record, &map);
-    crate::scene::block_authoring::retag_members(doc, record);
+    created
 }
 
 /// (`NULL` where an add failed) plus the source-handle → pasted-handle map.
@@ -658,19 +506,15 @@ pub(crate) fn paste_entities_kernel(
     // missing records with fresh handles from the target document.
     merge_table_records(doc, deps);
     // Shared block-definition merge (also used by `merge_clipboard_blocks`).
-    let apps = eed_app_map(doc, deps);
-    merge_block_defs(doc, &deps.blocks, &apps);
+    merge_block_defs(doc, &deps.blocks);
 
     let by_index: Vec<Handle> = entities
         .iter()
         .cloned()
         .map(|mut entity| {
-            remap_eed_apps(&mut entity, &apps);
-            let picture_placement = crate::scene::render_graph::dim_picture_placement(&entity);
             if let Some(t) = translate {
                 crate::scene::view::dispatch::apply_transform(&mut entity, t);
             }
-            crate::scene::render_graph::clear_dim_picture_placement(&mut entity);
             // Same `*D`-block re-point as `finalize_paste` (#290, #161): the
             // baked dimension geometry lives in WCS, so the paste gets its own
             // transformed copy of the snapshotted block.
@@ -683,12 +527,6 @@ pub(crate) fn paste_entities_kernel(
                         .find(|b| b.name.eq_ignore_ascii_case(&bn))
                         .map(|def| def.entities.clone())
                     {
-                        let mut subs = subs;
-                        if let Some(placement) = &picture_placement {
-                            for sub in &mut subs {
-                                crate::scene::view::dispatch::apply_transform(sub, placement);
-                            }
-                        }
                         let bt = translate.cloned().unwrap_or(
                             crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
                         );
@@ -711,7 +549,6 @@ pub(crate) fn paste_entities_kernel(
         Some(crate::command::EntityTransform::Translate(delta)) => *delta,
         _ => glam::DVec3::ZERO,
     };
-    let records = block_record_map(doc, &deps.blocks);
     for cap in &deps.ext_objects {
         let Some(&new_entity) = by_index.get(cap.entity_index) else {
             continue;
@@ -719,7 +556,7 @@ pub(crate) fn paste_entities_kernel(
         if new_entity.is_null() {
             continue;
         }
-        if let Some(new_root) = recreate_ext_subtree(doc, cap, Some(new_entity), &records) {
+        if let Some(new_root) = recreate_ext_subtree(doc, cap, Some(new_entity)) {
             if let Some(e) = doc.get_entity_mut(new_entity) {
                 e.common_mut().xdictionary_handle = Some(new_root);
             }
@@ -807,7 +644,7 @@ fn add_entity_clone_doc(
 /// Document-level verbatim block-definition recreate: the `&mut CadDocument`
 /// half of `Scene::define_block_raw` (no-op when the block exists). The
 /// trailing `bump_geometry` stays caller-side.
-pub(crate) fn define_block_raw_doc(
+fn define_block_raw_doc(
     doc: &mut codec::CadDocument,
     name: &str,
     base_point: codec::types::Vector3,
@@ -862,11 +699,6 @@ fn add_entity_clone_doc_inner(
     }
     entity.common_mut().handle = Handle::NULL;
     entity.common_mut().owner_handle = owner;
-    // An extension dictionary is exclusively owned; the clone must not claim
-    // the source's (cross-drawing it would dangle into the source document),
-    // or file validation reports "Extension dictionary <H> Cannot access".
-    // Paste reattaches a recreated subtree afterwards (finalize_paste).
-    entity.common_mut().xdictionary_handle = None;
 }
 
 /// Document-level fresh `*D<n>` block from `subs`: the `&mut CadDocument`
@@ -937,10 +769,9 @@ fn recreate_ext_subtree(
     doc: &mut codec::CadDocument,
     cap: &crate::app::ClipExtObjects,
     entity_handle: Option<Handle>,
-    records: &std::collections::HashMap<Handle, Handle>,
 ) -> Option<Handle> {
     use std::collections::HashMap;
-    let mut remap: HashMap<Handle, Handle> = records.clone();
+    let mut remap: HashMap<Handle, Handle> = HashMap::new();
     if let Some(eh) = entity_handle {
         remap.insert(cap.src_entity_handle, eh);
     }
@@ -955,14 +786,6 @@ fn recreate_ext_subtree(
         let mut obj = obj.clone();
         let new_h = remap[old];
         remap_object(&mut obj, new_h, &remap);
-        // A dynamic reference's link to its definition, indexed.
-        if let codec::objects::ObjectType::DynamicBlock(object) = &obj {
-            if let codec::objects::DynamicBlockData::Representation(link) = &object.data {
-                if object.dxf_name == "ACDB_BLOCKREPRESENTATION_DATA" {
-                    doc.block_representations.insert(new_h, link.block);
-                }
-            }
-        }
         doc.objects.insert(new_h, obj);
     }
     remap.get(&cap.root).copied()
@@ -1122,10 +945,6 @@ pub(crate) fn remap_object(
                 _ => {}
             }
         }
-        ObjectType::DynamicBlock(object) => {
-            object.handle = new_handle;
-            object.visit_handles_mut(&mut |h| *h = map(*h));
-        }
         // Other leaf object kinds don't appear in an entity xdictionary; if one
         // does, it's inserted with the fresh handle below via the caller's key,
         // but its internal owner is left as-is (best effort).
@@ -1195,7 +1014,7 @@ mod clipboard_xdict_clone_tests {
         let before: Vec<Handle> = dst.objects.keys().copied().collect();
         let dst_entity = dst.allocate_handle();
 
-        let new_root = recreate_ext_subtree(&mut dst, &cap, Some(dst_entity), &Default::default())
+        let new_root = recreate_ext_subtree(&mut dst, &cap, Some(dst_entity))
             .expect("recreated xdictionary root");
         assert!(!new_root.is_null());
         assert!(!before.contains(&new_root), "clone must use a fresh handle");
@@ -1232,8 +1051,7 @@ mod clipboard_xdict_clone_tests {
         let mut dst = codec::CadDocument::new();
         let before_len = dst.objects.len();
 
-        let root = recreate_ext_subtree(&mut dst, &cap, None, &Default::default())
-            .expect("recreated xdictionary root");
+        let root = recreate_ext_subtree(&mut dst, &cap, None).expect("recreated xdictionary root");
         let leaf = leaf_of(&dst, root);
         match dst.objects.get(&leaf) {
             Some(ObjectType::XRecord(x)) => assert!(
@@ -1405,7 +1223,7 @@ mod paste_entities_kernel_tests {
     fn remaps_leader_annotation_link_to_pasted_handles() {
         let mut seed = codec::CadDocument::new();
         let note = seed
-            .add_entity(codec::EntityType::MText(Box::new(codec::entities::MText::new())))
+            .add_entity(codec::EntityType::MText(codec::entities::MText::new()))
             .unwrap();
         let mut leader = codec::entities::Leader::default();
         leader.annotation_handle = note;
@@ -1641,88 +1459,5 @@ mod headless_reuse_proof_tests {
             record.entity_handles.contains(&pasted),
             "pasted entity must be registered as a member of the edited block"
         );
-    }
-}
-
-#[cfg(test)]
-mod define_transformed_block_doc_xdict_tests {
-    use super::define_transformed_block_doc;
-
-    /// No extension dictionary may be referenced by more than one entity.
-    fn assert_no_shared_xdicts(doc: &codec::CadDocument) {
-        use std::collections::HashMap;
-        let mut owners: HashMap<codec::Handle, usize> = HashMap::new();
-        for entity in doc.entities() {
-            if let Some(xd) = entity.common().xdictionary_handle {
-                if !xd.is_null() {
-                    *owners.entry(xd).or_default() += 1;
-                }
-            }
-        }
-        let shared: Vec<_> = owners
-            .iter()
-            .filter(|(_, &n)| n > 1)
-            .map(|(h, n)| format!("{h:?} x{n}"))
-            .collect();
-        assert!(
-            shared.is_empty(),
-            "shared extension dictionaries: {}",
-            shared.join(", ")
-        );
-    }
-
-    /// Pasted/derived sub-entities must not share the source's extension
-    /// dictionary. `define_transformed_block_doc` is the verbatim
-    /// document-level port of `Scene::define_transformed_block`, and its
-    /// clone helper likewise preserves `xdictionary_handle`; across drawings
-    /// that handle would dangle into the source document.
-    #[test]
-    fn cloned_subs_do_not_share_source_xdict() {
-        let mut doc = codec::CadDocument::new();
-
-        let dict_handle = doc.allocate_handle();
-        let mut dict = codec::objects::Dictionary::new();
-        dict.handle = dict_handle;
-        doc.objects
-            .insert(dict_handle, codec::objects::ObjectType::Dictionary(dict));
-
-        let mut line = codec::entities::Line::new();
-        line.common.xdictionary_handle = Some(dict_handle);
-        let src_handle = doc.add_entity(codec::EntityType::Line(line)).unwrap();
-
-        let subs = vec![doc.get_entity(src_handle).unwrap().clone()];
-        let name = define_transformed_block_doc(
-            &mut doc,
-            &subs,
-            &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
-        )
-        .expect("clone block must be created");
-        assert!(
-            name.starts_with("*D"),
-            "anonymous block expected, got {name}"
-        );
-
-        assert_no_shared_xdicts(&doc);
-        // Source keeps its dictionary.
-        match doc.get_entity(src_handle) {
-            Some(e) => assert_eq!(
-                e.common().xdictionary_handle,
-                Some(dict_handle),
-                "the source must keep its own dictionary"
-            ),
-            None => panic!("source entity missing"),
-        }
-        // Clones carry none.
-        let owned = doc.block_records.get(&name).unwrap().entity_handles.clone();
-        assert!(!owned.is_empty(), "clone block should own sub-entities");
-        for h in &owned {
-            match doc.get_entity(*h) {
-                Some(e) => assert!(
-                    e.common().xdictionary_handle.is_none(),
-                    "cloned child {h:?} must not carry an extension dictionary"
-                ),
-                None => panic!("cloned child {h:?} missing"),
-            }
-        }
     }
 }

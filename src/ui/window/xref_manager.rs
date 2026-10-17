@@ -590,7 +590,7 @@ impl XrefManagerPanel {
     pub fn view<'a>(
         &'a self,
         width: f32,
-        chrome: crate::ui::dock::Chrome,
+        auto_collapse: bool,
         missing: usize,
         doc: &'a CadDocument,
     ) -> Element<'a, Message> {
@@ -602,7 +602,7 @@ impl XrefManagerPanel {
                 crate::t!("External References").as_ref(),
                 self.entries.len()
             ),
-            chrome,
+            auto_collapse,
         );
         // Table content width: column widths plus gutters, stretched to the
         // dock when wider so rows fill the panel; narrower docks sidescroll.

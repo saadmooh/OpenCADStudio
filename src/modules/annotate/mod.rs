@@ -29,7 +29,6 @@ pub mod radius_dim;
 pub mod table_cmd;
 pub mod text;
 pub mod textedit;
-pub mod txt2mtxt;
 pub mod tolerance_cmd;
 
 use crate::modules::{CadModule, RibbonGroup, RibbonItem, StyleKey};

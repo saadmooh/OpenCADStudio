@@ -898,112 +898,6 @@ impl HostApi for V4PluginHostApi {
             }
         }
     }
-
-    fn create_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-        entries: Vec<crate::host::XRecordEntry>,
-    ) -> Result<Handle, String> {
-        match self.request(PluginRequest::CreateXRecord {
-            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
-            name: name.to_string(),
-            entries,
-        }) {
-            Ok(PluginResponse::XRecordCreateResult(result)) => {
-                if result.is_ok() {
-                    self.document_cache = OnceCell::new();
-                }
-                result
-            }
-            Ok(PluginResponse::Error(error)) => Err(error),
-            Ok(other) => Err(format!("unexpected XRecord create response: {other:?}")),
-            Err(error) => Err(error.to_string()),
-        }
-    }
-
-    fn read_xrecord(
-        &self,
-        dictionary_path: &[&str],
-        name: &str,
-    ) -> Result<Vec<crate::host::XRecordEntry>, String> {
-        match self.request(PluginRequest::ReadXRecord {
-            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
-            name: name.to_string(),
-        }) {
-            Ok(PluginResponse::XRecordEntries(result)) => result,
-            Ok(PluginResponse::Error(error)) => Err(error),
-            Ok(other) => Err(format!("unexpected XRecord read response: {other:?}")),
-            Err(error) => Err(error.to_string()),
-        }
-    }
-
-    fn update_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-        entries: Vec<crate::host::XRecordEntry>,
-    ) -> Result<Handle, String> {
-        match self.request(PluginRequest::UpdateXRecord {
-            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
-            name: name.to_string(),
-            entries,
-        }) {
-            Ok(PluginResponse::XRecordUpdateResult(result)) => {
-                if result.is_ok() {
-                    self.document_cache = OnceCell::new();
-                }
-                result
-            }
-            Ok(PluginResponse::Error(error)) => Err(error),
-            Ok(other) => Err(format!("unexpected XRecord update response: {other:?}")),
-            Err(error) => Err(error.to_string()),
-        }
-    }
-
-    fn delete_xrecord(
-        &mut self,
-        dictionary_path: &[&str],
-        name: &str,
-    ) -> Result<crate::host::XRecord, String> {
-        match self.request(PluginRequest::DeleteXRecord {
-            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
-            name: name.to_string(),
-        }) {
-            Ok(PluginResponse::XRecordDeleteResult(result)) => result,
-            Ok(PluginResponse::Error(error)) => Err(error),
-            Ok(other) => Err(format!("unexpected XRecord delete response: {other:?}")),
-            Err(error) => Err(error.to_string()),
-        }
-    }
-
-    fn list_xrecords(&self, dictionary_path: &[&str]) -> Result<Vec<String>, String> {
-        match self.request(PluginRequest::ListXRecords {
-            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
-        }) {
-            Ok(PluginResponse::XRecordNames(result)) => result,
-            Ok(PluginResponse::Error(error)) => Err(error),
-            Ok(other) => Err(format!("unexpected XRecord list response: {other:?}")),
-            Err(error) => Err(error.to_string()),
-        }
-    }
-
-    fn set_reference_only(&mut self, handle: Handle, reference_only: bool) -> Result<(), String> {
-        match self.request(PluginRequest::SetReferenceOnly {
-            handle,
-            reference_only,
-        }) {
-            Ok(PluginResponse::SetReferenceOnlyResult(result)) => {
-                if result.is_ok() {
-                    self.document_cache = OnceCell::new();
-                }
-                result
-            }
-            Ok(PluginResponse::Error(error)) => Err(error),
-            Ok(other) => Err(format!("unexpected reference-only response: {other:?}")),
-            Err(error) => Err(error.to_string()),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1210,7 +1104,7 @@ mod tests {
 
     #[test]
     fn v4_client_notification_queue_size_env_is_honored() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = ENV_LOCK.lock().unwrap();
         let prev = std::env::var("OCS_PLUGIN_NOTIFY_QUEUE_SIZE").ok();
         std::env::set_var("OCS_PLUGIN_NOTIFY_QUEUE_SIZE", "7");
         assert_eq!(notify_queue_size(), 7);
@@ -1222,7 +1116,7 @@ mod tests {
 
     #[test]
     fn v4_client_notification_queue_drops_newest_on_overflow() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = ENV_LOCK.lock().unwrap();
         let prev = std::env::var("OCS_PLUGIN_NOTIFY_QUEUE_SIZE").ok();
         std::env::set_var("OCS_PLUGIN_NOTIFY_QUEUE_SIZE", "1");
         let (host_stream, mut runner_stream) = connect_pair();

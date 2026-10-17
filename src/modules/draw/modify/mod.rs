@@ -1,11 +1,9 @@
 pub mod align;
 pub mod array;
-pub mod arrayedit;
 pub mod attedit;
 pub mod blend;
 pub mod block_edit;
 pub mod break_cmd;
-pub mod bvstate;
 pub mod copy;
 pub mod delete;
 mod entity_index;
@@ -32,4 +30,3 @@ pub mod stretch;
 pub mod torient;
 pub mod translate;
 pub mod trim;
-pub mod txtexp;

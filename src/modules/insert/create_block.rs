@@ -1,8 +1,10 @@
+use crate::t;
 use codec::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::scene::model::wire_model::WireModel;
 
 pub fn tool() -> ToolDef {
     ToolDef {
@@ -10,6 +12,84 @@ pub fn tool() -> ToolDef {
         label: "Create Block",
         icon: IconKind::Svg(include_bytes!("../../../assets/icons/blocks/block.svg")),
         event: ModuleEvent::Command("BLOCK".to_string()),
+    }
+}
+
+enum Step {
+    Name,
+    Base { name: String },
+}
+
+pub struct CreateBlockCommand {
+    handles: Vec<Handle>,
+    step: Step,
+}
+
+impl CreateBlockCommand {
+    pub fn new(handles: Vec<Handle>) -> Self {
+        Self {
+            handles,
+            step: Step::Name,
+        }
+    }
+}
+
+impl CadCommand for CreateBlockCommand {
+    fn name(&self) -> &'static str {
+        "BLOCK"
+    }
+
+    fn prompt(&self) -> String {
+        match &self.step {
+            Step::Name => t!(
+                "BLOCK  Enter block name  [%{count} objects selected]:",
+                count = self.handles.len()
+            )
+            .into_owned(),
+            Step::Base { name } => t!(
+                "BLOCK  Specify base point for \"%{name}\"  [%{count} objects]:",
+                name = name,
+                count = self.handles.len()
+            )
+            .into_owned(),
+        }
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        match &self.step {
+            Step::Name => CmdResult::NeedPoint,
+            Step::Base { name } => CmdResult::CreateBlock {
+                handles: self.handles.clone(),
+                name: name.clone(),
+                base: pt,
+            },
+        }
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn wants_text_input(&self) -> bool {
+        matches!(self.step, Step::Name)
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        if !matches!(self.step, Step::Name) {
+            return None;
+        }
+        let name = text.trim();
+        if name.is_empty() {
+            return None;
+        }
+        self.step = Step::Base {
+            name: name.to_string(),
+        };
+        Some(CmdResult::NeedPoint)
+    }
+
+    fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
+        vec![]
     }
 }
 
@@ -22,7 +102,7 @@ impl CadCommand for BlockPickBasePointCommand {
     }
 
     fn prompt(&self) -> String {
-        "Specify insertion base point:".to_string()
+        crate::t!("BLOCK  Specify insertion base point:").into_owned()
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
@@ -70,9 +150,9 @@ impl CadCommand for BlockOnScreenCommand {
 
     fn prompt(&self) -> String {
         if self.need_base {
-            "Specify insertion base point:".to_string()
+            crate::t!("BLOCK  Specify insertion base point:").into_owned()
         } else {
-            "Select objects:".to_string()
+            crate::t!("BLOCK  Select objects:").into_owned()
         }
     }
 
@@ -370,8 +450,7 @@ mod tests {
             hyperlink_desc: "".to_string(),
             redefine: false,
         };
-        // No objects define an empty block.
-        assert!(scene.create_block_with_options(opt_no_handles).is_ok());
+        assert!(scene.create_block_with_options(opt_no_handles).is_err());
     }
 
     #[test]

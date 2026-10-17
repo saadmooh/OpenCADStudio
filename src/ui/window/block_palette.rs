@@ -167,10 +167,6 @@ pub enum BlockPaletteMsg {
     View(ViewMode),
     PickFile,
     FilePicked(Result<PathBuf, String>),
-    /// Web: the picked drawing arrived already parsed from the picker's
-    /// bytes — a name-only path has nothing behind it to read later.
-    #[cfg(target_arch = "wasm32")]
-    FilePickedDoc(Result<(String, codec::CadDocument), String>),
     Refresh,
     Option(OptionMsg),
     ToggleOptions,
@@ -804,15 +800,11 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
 }
 
 /// Build the docked panel element from the palette state.
-pub fn view(
-    palette: &BlockPalette,
-    width: f32,
-    chrome: crate::ui::dock::Chrome,
-) -> Element<'_, Message> {
+pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<'_, Message> {
     let title_bar = crate::ui::dock::title_bar(
         PanelId::BlockPalette,
         crate::t!("Blocks").into_owned(),
-        chrome,
+        auto_collapse,
     );
 
     let tabs = {
@@ -999,8 +991,7 @@ pub fn view(
     };
 
     crate::ui::dock::frame(
-        title_bar,
-        column![top, body, options_card(palette)].spacing(6),
+        column![title_bar, top, body, options_card(palette)].spacing(6),
         width,
     )
 }

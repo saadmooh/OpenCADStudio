@@ -13,7 +13,6 @@ use crate::scene::pick::grip::{find_hit_grip, find_hit_grip_paper, find_hit_grip
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
-use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
 use crate::ui::PropertiesPanel;
 use codec::types::Color as AcadColor;
 use codec::{EntityType as AcadEntityType, Handle};
@@ -976,17 +975,6 @@ impl OpenCADStudio {
         value: String,
     ) -> Task<Message> {
         let i = self.active_tab;
-        if field == "arrowhead_handle" {
-            let handle = crate::entities::arrowheads::resolve(
-                &mut self.tabs[i].scene.document,
-                &value,
-            )
-            .filter(|h| !h.is_null());
-            if let Some(s) = self.mleaderstyle_mut(i) {
-                s.arrowhead_handle = handle;
-            }
-            return Task::none();
-        }
         let doc = &self.tabs[i].scene.document;
         let handle: Option<codec::types::Handle> =
             if value == "None" || value == "ByBlock" || value == "Closed filled" {
@@ -1147,68 +1135,27 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(super) fn on_color_window_pick(
-        &mut self,
-        color: codec::types::Color,
-        name: Option<String>,
-    ) -> Task<Message> {
-        if let Some(crate::app::ColorPickTarget::Interface(target)) = self
-            .color_picker
-            .as_ref()
-            .map(|picker| picker.target.clone())
-        {
-            self.color_picker = None;
-            let Some((r, g, b)) = crate::ui::color_select::math::color_rgb(color) else {
-                return Task::none();
-            };
-            // Hand the result to the same handler the typed hex field uses, so
-            // the picker and the field cannot drift apart on validation or
-            // persistence.
-            let hex = crate::app::config::rgb_to_hex([r, g, b]);
-            use crate::app::UiColor;
-            return Task::done(match target {
-                UiColor::ModelBackground => Message::ModelSpaceBgChanged(hex),
-                UiColor::PaperBackground => Message::PaperSpaceBgChanged(hex),
-                UiColor::DeskBackground => Message::DeskSpaceBgChanged(hex),
-                UiColor::Theme(index) => Message::OptionsThemeColorChanged(index, hex),
-                UiColor::Crosshair => Message::CrosshairColorChanged(hex),
-                UiColor::SnapMarker => Message::SnapMarkerColorChanged(hex),
-                UiColor::CommandText => Message::CommandTextColorChanged(hex),
-            });
-        }
+    pub(super) fn on_color_window_pick(&mut self, color: codec::types::Color) -> Task<Message> {
         if matches!(
-            self.color_picker.as_ref().map(|picker| &picker.target),
+            self.color_pick_target.as_ref().map(|(target, _)| target),
             Some(crate::app::ColorPickTarget::PlotStyle)
         ) {
-            self.color_picker = None;
+            self.color_pick_target = None;
 
-            if let Some((r, g, b)) = crate::ui::color_select::math::color_rgb(color) {
-                self.ps_color_buf = crate::ui::color_select::math::hex_string(r, g, b);
+            let rgb = match color {
+                codec::types::Color::Rgb { r, g, b } => Some((r, g, b)),
+                codec::types::Color::Index(index) => codec::types::aci_table::aci_to_rgb(index),
+                _ => None,
+            };
+
+            if let Some((r, g, b)) = rgb {
+                self.ps_color_buf = format!("#{r:02X}{g:02X}{b:02X}");
             }
 
             return self.on_plot_style_panel_apply();
         }
         let s = crate::ui::color_select::color_to_aci_string(color);
-        let edit = match self.color_picker.take().map(|picker| picker.target) {
-            Some(crate::app::ColorPickTarget::Gradient(index)) => {
-                Some(Message::GraphicAttributes(GraphicAttributesMsg::Gradient(
-                    crate::ui::window::gradient_editor::GradientMsg::Color(index, color),
-                )))
-            }
-            Some(crate::app::ColorPickTarget::ViewBackground(slot)) => {
-                crate::ui::color_select::math::color_rgb(color).map(|(r, g, b)| {
-                    Message::PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg::BgColor(
-                        slot,
-                        [r, g, b],
-                    ))
-                })
-            }
-            Some(crate::app::ColorPickTarget::GraphicAttributesLine) => Some(
-                Message::GraphicAttributes(GraphicAttributesMsg::LineColor(color)),
-            ),
-            Some(crate::app::ColorPickTarget::GraphicAttributesSolid) => Some(
-                Message::GraphicAttributes(GraphicAttributesMsg::FillColor(color)),
-            ),
+        let edit = match self.color_pick_target.take().map(|(target, _)| target) {
             Some(crate::app::ColorPickTarget::DimStyle(f)) => Some(Message::DsEdit(f, s)),
             Some(crate::app::ColorPickTarget::MLeader(f)) => {
                 Some(Message::MLeaderStyleEdit { field: f, value: s })
@@ -1218,9 +1165,7 @@ impl OpenCADStudio {
                 field: f,
                 value: s,
             }),
-            Some(crate::app::ColorPickTarget::Properties) => {
-                return self.set_property_color(color, name);
-            }
+            Some(crate::app::ColorPickTarget::Properties) => Some(Message::PropColorChanged(color)),
             Some(crate::app::ColorPickTarget::PropertiesBg) => {
                 Some(Message::PropBgColorChanged(color))
             }
@@ -1228,17 +1173,13 @@ impl OpenCADStudio {
                 Some(Message::PropColorFieldChanged { field, color })
             }
             Some(crate::app::ColorPickTarget::MText) => Some(Message::MTextColorChanged(color)),
-            Some(crate::app::ColorPickTarget::Ribbon) => {
-                let task = self.update(Message::RibbonColorChanged(color));
-                self.ribbon.active_color_book = name.map(|name| (color, name));
-                return task;
-            }
-            Some(crate::app::ColorPickTarget::Layer(layer)) => {
+            Some(crate::app::ColorPickTarget::Ribbon) => Some(Message::RibbonColorChanged(color)),
+            Some(crate::app::ColorPickTarget::Layer(name)) => {
                 let i = self.active_tab;
-                match self.layer_panel_index(i, &layer) {
+                match self.layer_panel_index(i, &name) {
                     Some(idx) => {
                         self.tabs[i].layers.selected = Some(idx);
-                        return self.set_layer_color(color, name.as_deref());
+                        Some(Message::LayerColorSet(color))
                     }
                     None => None,
                 }
@@ -1246,10 +1187,7 @@ impl OpenCADStudio {
             Some(crate::app::ColorPickTarget::LayerState(idx)) => {
                 Some(Message::LayerStateEditorLayerColor(idx, color))
             }
-            // Handled before this match.
-            Some(
-                crate::app::ColorPickTarget::PlotStyle | crate::app::ColorPickTarget::Interface(_),
-            ) => None,
+            Some(crate::app::ColorPickTarget::PlotStyle) => None,
             None => None,
         };
         if let Some(m) = edit {
@@ -1266,7 +1204,7 @@ impl OpenCADStudio {
             field,
             "dimltex_handle" | "dimltex1_handle" | "dimltex2_handle"
         );
-        let doc = &mut self.tabs[i].scene.document;
+        let doc = &self.tabs[i].scene.document;
         let handle = if value == "Default" || value == "ByBlock" {
             codec::types::Handle::NULL
         } else if is_lt {
@@ -1276,8 +1214,11 @@ impl OpenCADStudio {
                 .map(|lt| lt.handle)
                 .unwrap_or(codec::types::Handle::NULL)
         } else {
-            // A standard arrowhead's block is created on first use.
-            crate::entities::arrowheads::resolve(doc, &value).unwrap_or(codec::types::Handle::NULL)
+            doc.block_records
+                .iter()
+                .find(|b| b.name == value)
+                .map(|b| b.handle)
+                .unwrap_or(codec::types::Handle::NULL)
         };
         // Staged: persists on Apply.
         if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {

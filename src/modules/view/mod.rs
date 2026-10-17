@@ -2,9 +2,7 @@
 
 mod cascade;
 mod count_palette;
-pub mod dview;
 mod file_tabs;
-mod graphic_attributes_palette;
 mod layout_tabs;
 pub mod limits;
 mod orbit;
@@ -18,9 +16,9 @@ mod sheetset;
 mod tile_horiz;
 mod tile_vert;
 mod tool_palettes;
+mod toolspace;
 pub mod ucs_cmd;
 mod ucs_icon;
-pub mod view_cmd;
 mod view_front;
 mod view_iso;
 mod view_right;
@@ -122,10 +120,10 @@ impl CadModule for ViewModule {
                 RibbonGroup {
                     title: "Palettes",
                     tools: vec![
+                        RibbonItem::LargeTool(toolspace::tool()),
                         RibbonItem::LargeTool(tool_palettes::tool()),
                         RibbonItem::LargeTool(properties_palette::tool()),
                         RibbonItem::LargeTool(count_palette::tool()),
-                        RibbonItem::LargeTool(graphic_attributes_palette::tool()),
                         RibbonItem::LargeTool(sheetset::tool()),
                     ],
                 },

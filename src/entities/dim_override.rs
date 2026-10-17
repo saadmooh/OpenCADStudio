@@ -507,7 +507,14 @@ fn apply_property(doc: &mut CadDocument, handle: Handle, field: &str, value: &st
     if let Some(code) = handle_field {
         let resolved = match field {
             "dim_radial_arrow" | "dim_arrowhead_1" | "dim_arrowhead_2" => {
-                crate::entities::arrowheads::resolve(doc, trimmed)
+                if trimmed == "Closed filled" {
+                    Some(Handle::NULL)
+                } else {
+                    doc.block_records
+                        .iter()
+                        .find(|record| record.name == trimmed)
+                        .map(|record| record.handle)
+                }
             }
             "dim_text_style" => doc
                 .text_styles

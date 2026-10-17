@@ -1,56 +1,27 @@
+use crate::t;
+
 use crate::command::{CadCommand, CmdResult};
 use glam::DVec3;
 
 // ── Command implementation ────────────────────────────────────────────────
 
-/// BASE (`Enter base point <x,y,z>:`) and INSBASE
-/// (`Enter new value for INSBASE <x,y,z>:`): a point sets the active space's
-/// insertion base through the inline `BASE <x> <y> <z>` handler; Enter keeps
-/// the current one.
-pub struct BaseCommand {
-    current: DVec3,
-    variable: bool,
-}
+/// Picks one point and delegates to the inline `BASE <x> <y> <z>` handler,
+/// which writes the active space's insertion base point onto the document.
+pub struct BaseCommand;
 
 impl BaseCommand {
-    pub fn new(current: DVec3) -> Self {
-        Self {
-            current,
-            variable: false,
-        }
+    pub fn new() -> Self {
+        Self
     }
-
-    /// The INSBASE system variable's prompt.
-    pub fn insbase(current: DVec3) -> Self {
-        Self {
-            current,
-            variable: true,
-        }
-    }
-}
-
-fn point_text(p: DVec3) -> String {
-    format!("{:.4},{:.4},{:.4}", p.x, p.y, p.z)
 }
 
 impl CadCommand for BaseCommand {
     fn name(&self) -> &'static str {
-        if self.variable {
-            "INSBASE"
-        } else {
-            "BASE"
-        }
+        "BASE"
     }
 
     fn prompt(&self) -> String {
-        if self.variable {
-            format!(
-                "Enter new value for INSBASE <{}>:",
-                point_text(self.current)
-            )
-        } else {
-            format!("Enter base point <{}>:", point_text(self.current))
-        }
+        t!("BASE  Specify base point:").into_owned()
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
@@ -58,7 +29,7 @@ impl CadCommand for BaseCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Measurement(String::new())
+        CmdResult::Cancel
     }
 }
 

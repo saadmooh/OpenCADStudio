@@ -188,11 +188,7 @@ impl OpenCADStudio {
         }
     }
 
-    pub(in crate::app) fn start_count_command(
-        &mut self,
-        i: usize,
-        command: Box<dyn CadCommand>,
-    ) -> Task<Message> {
+    fn start_count_command(&mut self, i: usize, command: Box<dyn CadCommand>) -> Task<Message> {
         self.reset_command_start_state(i);
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(command);
@@ -263,9 +259,13 @@ impl OpenCADStudio {
         self.count_palette.show = open;
         self.ribbon.set_count_palette(open);
         if open {
-            self.dock_open_at_default(id);
-        } else {
-            self.dock_unpeek(id);
+            if self.dock.location(id).is_none() {
+                self.dock
+                    .dock(id, crate::app::config::DockSide::Right, usize::MAX);
+            }
+            self.dock_expanded = Some(id);
+        } else if self.dock_expanded == Some(id) {
+            self.dock_expanded = None;
         }
     }
 

@@ -226,11 +226,7 @@ fn record(
     value
 }
 
-fn entity_record(
-    entity: &codec::EntityType,
-    reference_only: bool,
-    disabled_plugins: &rustc_hash::FxHashSet<String>,
-) -> Result<Value, String> {
+fn entity_record(entity: &codec::EntityType) -> Result<Value, String> {
     let (kind, properties) = enum_parts(entity)?;
     let mut value = record(
         "entities",
@@ -241,26 +237,14 @@ fn entity_record(
         properties,
     );
     let object = value.as_object_mut().expect("record object");
-    // `display_type` carries the plugin-declared class label
-    // ("<Label> (<Native>)") while a live declaring plugin claims the
-    // entity's XDATA class identity; without one it is byte-identical to the
-    // native ui_name. The raw `type` and `record_type` fields stay native so
-    // existing scripts and filters keep working.
-    let native = crate::entities::names::ui_name(entity);
     object.insert(
         "display_type".into(),
-        json!(crate::plugin::entity_labels::display_type_title(
-            crate::plugin::entity_labels::custom_entity_class_label(disabled_plugins, entity),
-            native.to_string(),
-        )),
+        json!(crate::entities::names::ui_name(entity)),
     );
     object.insert(
         "record_type".into(),
         json!(crate::entities::names::dxf_name(entity)),
     );
-    // Scene-scoped designation (API v9): the set membership of this entity's
-    // handle, resolved by the caller from the live scene.
-    object.insert("reference_only".into(), json!(reference_only));
     Ok(value)
 }
 
@@ -322,22 +306,11 @@ fn map_records<T: Serialize>(
 }
 
 fn collection_records(
-    scene: &crate::scene::Scene,
+    document: &codec::CadDocument,
     collection: &str,
-    disabled_plugins: &rustc_hash::FxHashSet<String>,
 ) -> Result<Vec<Value>, String> {
-    let document = &scene.document;
     match collection {
-        "entities" => document
-            .entities()
-            .map(|entity| {
-                entity_record(
-                    entity,
-                    scene.is_reference_only(entity.common().handle),
-                    disabled_plugins,
-                )
-            })
-            .collect(),
+        "entities" => document.entities().map(entity_record).collect(),
         "objects" => {
             let mut objects: Vec<_> = document.objects.iter().collect();
             objects.sort_by_key(|(handle, _)| handle.value());
@@ -1184,7 +1157,9 @@ fn apply_updates(
 /// float would otherwise never match its `expected` value.
 fn json_values_match(actual: &Value, expected: &Value) -> bool {
     match (actual, expected) {
-        (Value::Number(a), Value::Number(b)) if a.is_f64() || b.is_f64() => numbers_match(a, b),
+        (Value::Number(a), Value::Number(b)) if a.is_f64() || b.is_f64() => {
+            a.as_f64() == b.as_f64()
+        }
         (Value::Array(a), Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_values_match(a, b))
         }
@@ -1194,28 +1169,6 @@ fn json_values_match(actual: &Value, expected: &Value) -> bool {
                     .all(|(key, a)| b.get(key).is_some_and(|b| json_values_match(a, b)))
         }
         _ => actual == expected,
-    }
-}
-
-/// `10.0` matches `10`, but an integer past f64 precision never matches a
-/// float it merely rounds onto: a mixed pair is equal only when the float is
-/// whole and converts back to exactly that integer.
-fn numbers_match(a: &serde_json::Number, b: &serde_json::Number) -> bool {
-    let (int, float) = match (a.as_f64(), b.as_f64()) {
-        (Some(x), Some(y)) if a.is_f64() && b.is_f64() => return x == y,
-        (_, Some(y)) if b.is_f64() => (a, y),
-        (Some(x), _) => (b, x),
-        _ => return false,
-    };
-    if !float.is_finite() || float.fract() != 0.0 {
-        return false;
-    }
-    if let Some(i) = int.as_i64() {
-        i as f64 == float && float as i64 == i
-    } else if let Some(u) = int.as_u64() {
-        u as f64 == float && float as u64 == u
-    } else {
-        false
     }
 }
 
@@ -1410,32 +1363,28 @@ impl OpenCADStudio {
         }
         let definitions = referenced_definitions(&root_type);
         let runtime_schema = collection.and_then(|collection| {
-            collection_records(
-                &self.tabs[self.active_tab].scene,
-                collection,
-                &self.disabled_plugins,
-            )
-            .ok()?
-            .into_iter()
-            .find(|record| {
-                let type_matches = record["type"]
-                    .as_str()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(requested_type))
-                    || collection_root_type(collection)
-                        .is_some_and(|name| name.eq_ignore_ascii_case(requested_type));
-                type_matches
-                    && request["handle"].as_str().is_none_or(|handle| {
-                        record["handle"].as_str().is_some_and(|actual| {
-                            actual.eq_ignore_ascii_case(without_hex_prefix(handle))
+            collection_records(&self.tabs[self.active_tab].scene.document, collection)
+                .ok()?
+                .into_iter()
+                .find(|record| {
+                    let type_matches = record["type"]
+                        .as_str()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(requested_type))
+                        || collection_root_type(collection)
+                            .is_some_and(|name| name.eq_ignore_ascii_case(requested_type));
+                    type_matches
+                        && request["handle"].as_str().is_none_or(|handle| {
+                            record["handle"].as_str().is_some_and(|actual| {
+                                actual.eq_ignore_ascii_case(without_hex_prefix(handle))
+                            })
                         })
-                    })
-                    && request["name"].as_str().is_none_or(|name| {
-                        record["name"]
-                            .as_str()
-                            .is_some_and(|actual| actual.eq_ignore_ascii_case(name))
-                    })
-            })
-            .map(|record| runtime_value_schema(&record["properties"], collection, ""))
+                        && request["name"].as_str().is_none_or(|name| {
+                            record["name"]
+                                .as_str()
+                                .is_some_and(|actual| actual.eq_ignore_ascii_case(name))
+                        })
+                })
+                .map(|record| runtime_value_schema(&record["properties"], collection, ""))
         });
         json!({
             "ok":true,
@@ -1458,20 +1407,20 @@ impl OpenCADStudio {
     }
 
     pub(super) fn record_query(&self, request: &Value) -> Value {
-        let scene = &self.tabs[self.active_tab].scene;
+        let document = &self.tabs[self.active_tab].scene.document;
         let Some(collection) = request["collection"].as_str() else {
             return self.record_capabilities();
         };
         let mut records = Vec::new();
         if collection == "all" {
             for (name, _) in COLLECTIONS {
-                match collection_records(scene, name, &self.disabled_plugins) {
+                match collection_records(document, name) {
                     Ok(mut values) => records.append(&mut values),
                     Err(error) => return failure("serialization_failed", error),
                 }
             }
         } else {
-            match collection_records(scene, collection, &self.disabled_plugins) {
+            match collection_records(document, collection) {
                 Ok(values) => records = values,
                 Err(error) => return failure("unknown_collection", error),
             }
@@ -1534,12 +1483,6 @@ impl OpenCADStudio {
                     requested_handle(request).map_err(|error| failure("invalid_handle", error))?;
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     return Err(failure("layer_locked", "entity is on a locked layer"));
-                }
-                if self.tabs[i].scene.is_reference_only(handle) {
-                    return Err(failure(
-                        "reference_only",
-                        "entity is reference-only (plugin-owned display data)",
-                    ));
                 }
                 let source = self.tabs[i]
                     .scene
@@ -1702,33 +1645,6 @@ mod tests {
 
     use super::OpenCADStudio;
 
-    /// Whole floats match their integer; integers past f64 precision never
-    /// match the neighbouring float they round onto.
-    #[test]
-    fn numbers_match_by_value_without_precision_loss() {
-        let number = |value: Value| match value {
-            Value::Number(number) => number,
-            _ => unreachable!(),
-        };
-        assert!(super::numbers_match(
-            &number(json!(10)),
-            &number(json!(10.0))
-        ));
-        assert!(!super::numbers_match(
-            &number(json!(10)),
-            &number(json!(10.5))
-        ));
-        let past_precision = number(json!(9_007_199_254_740_993_u64));
-        assert!(!super::numbers_match(
-            &past_precision,
-            &number(json!(9_007_199_254_740_992.0))
-        ));
-        assert!(super::numbers_match(
-            &number(json!(-3)),
-            &number(json!(-3.0))
-        ));
-    }
-
     fn execute(app: &mut OpenCADStudio, mut request: Value, id: &str) -> Value {
         let state = app.automation_op(r#"{"protocol":1,"op":"state"}"#);
         let object = request.as_object_mut().unwrap();
@@ -1737,90 +1653,6 @@ mod tests {
         object.insert("document_id".into(), state["document_id"].clone());
         object.insert("revision".into(), state["revision"].clone());
         app.automation_op(&request.to_string())
-    }
-
-    #[test]
-    fn entities_records_expose_the_reference_only_designation() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        let i = app.active_tab;
-
-        let handle =
-            app.tabs[i]
-                .scene
-                .add_entity(EntityType::Line(codec::entities::Line::from_points(
-                    Vector3::new(0.0, 0.0, 0.0),
-                    Vector3::new(10.0, 0.0, 0.0),
-                )));
-        // The designation is plugin-mutated scene state: mark through the
-        // same host API a plugin uses, so the read surface reflects the
-        // live set rather than any stored marker.
-        fn mark(app: &mut OpenCADStudio, handle: Handle, on: bool) {
-            let i = app.active_tab;
-            crate::app::plugin_host::HostSession::new(app, i)
-                .set_reference_only(handle, on)
-                .expect("mark through the plugin host API");
-        }
-
-        // The read surface reports the designation alongside the record.
-        mark(&mut app, handle, true);
-        let records = app.record_query(&json!({"collection":"entities"}));
-        assert_eq!(records["count"], 1);
-        assert_eq!(
-            records["records"][0]["handle"],
-            json!(format!("{:X}", handle.value()))
-        );
-        assert_eq!(records["records"][0]["reference_only"], json!(true));
-
-        // The MCP write path treats a reference-only entity like a locked
-        // layer: the edit is refused, honestly.
-        let refused = execute(
-            &mut app,
-            json!({
-                "op":"set_properties",
-                "collection":"entities",
-                "handle": format!("{:X}", handle.value()),
-                "updates":[{"path":"/end/x","value":20.0}],
-            }),
-            "reference-only",
-        );
-        assert_eq!(refused["ok"], json!(false));
-        assert_eq!(refused["code"], json!("reference_only"));
-
-        // Clearing the designation is reported too.
-        mark(&mut app, handle, false);
-        let records = app.record_query(&json!({"collection":"entities"}));
-        assert_eq!(records["records"][0]["reference_only"], json!(false));
-    }
-
-    #[test]
-    fn entities_records_display_type_stays_native_without_a_loaded_plugin() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        let i = app.active_tab;
-
-        // An entity stamped with a perfect plugin class identity (registered
-        // app, class-prefix key) still shows the native display while no
-        // declaring plugin is loaded — the gating is live manager state.
-        let mut entity = EntityType::Line(codec::entities::Line::from_points(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        ));
-        let mut record = codec::xdata::ExtendedDataRecord::new("CVIFC");
-        record.add_value(codec::xdata::XDataValue::String(
-            "CVIFC-CLASS:LINE".to_string(),
-        ));
-        entity.common_mut().extended_data.add_record(record);
-        app.tabs[i].scene.add_entity(entity);
-
-        let records = app.record_query(&json!({"collection":"entities"}));
-        assert_eq!(records["count"], 1);
-        assert_eq!(records["records"][0]["type"], json!("Line"));
-        assert_eq!(
-            records["records"][0]["display_type"],
-            json!("Line"),
-            "display_type is byte-identical to the native ui_name when no plugin is loaded"
-        );
     }
 
     #[test]
