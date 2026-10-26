@@ -1,0 +1,956 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.2" version="1.2" date="2026-10-15">
+  <Units>
+    <Metric areaUnit="squareMeter" linearUnit="meter" />
+  </Units>
+  <Parcels>
+    <Parcel name="LOT-101" area="18100.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 100.7298</Start>
+          <End>160.0000 0.0000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 0.0000</Start>
+          <End>0.0000 0.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 0.0000</Start>
+          <End>0.0000 116.2500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 116.2500</Start>
+          <End>95.5680 116.2500</End>
+        </Line>
+        <Line>
+          <Start>95.5680 116.2500</Start>
+          <End>160.0000 100.7298</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-102" area="499.9999" desc="Zoning: Civic / Institutional, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>95.5680 116.2500</Start>
+          <End>160.0000 116.2500</End>
+        </Line>
+        <Line>
+          <Start>160.0000 116.2500</Start>
+          <End>160.0000 100.7298</End>
+        </Line>
+        <Line>
+          <Start>160.0000 100.7298</Start>
+          <End>95.5680 116.2500</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-103" area="600.0000" desc="Zoning: Commercial / Retail, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>0.0000 116.2500</Start>
+          <End>0.0000 120.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 120.0000</Start>
+          <End>160.0000 120.0000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 120.0000</Start>
+          <End>160.0000 116.2500</End>
+        </Line>
+        <Line>
+          <Start>160.0000 116.2500</Start>
+          <End>0.0000 116.2500</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-104" area="100.0002" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 120.6250</Start>
+          <End>160.0000 120.0000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 120.0000</Start>
+          <End>0.0000 120.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 120.0000</Start>
+          <End>0.0000 120.6250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 120.6250</Start>
+          <End>160.0000 120.6250</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-105" area="349.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>0.0000 120.6250</Start>
+          <End>0.0000 122.8125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 122.8125</Start>
+          <End>160.0000 122.8125</End>
+        </Line>
+        <Line>
+          <Start>160.0000 122.8125</Start>
+          <End>160.0000 120.6250</End>
+        </Line>
+        <Line>
+          <Start>160.0000 120.6250</Start>
+          <End>0.0000 120.6250</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-106" area="900.0001" desc="Zoning: Commercial / Retail, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 125.6250</Start>
+          <End>160.0000 122.8125</End>
+        </Line>
+        <Line>
+          <Start>160.0000 122.8125</Start>
+          <End>0.0000 122.8125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 122.8125</Start>
+          <End>0.0000 125.6250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 125.6250</Start>
+          <End>0.0000 128.4375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 128.4375</Start>
+          <End>160.0000 128.4375</End>
+        </Line>
+        <Line>
+          <Start>160.0000 128.4375</Start>
+          <End>160.0000 125.6250</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-107" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 131.2500</Start>
+          <End>160.0000 128.4375</End>
+        </Line>
+        <Line>
+          <Start>160.0000 128.4375</Start>
+          <End>0.0000 128.4375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 128.4375</Start>
+          <End>0.0000 131.2500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 131.2500</Start>
+          <End>160.0000 131.2500</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-108" area="5549.0973" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Curve rot="cw" radius="6.0000" length="9.4248">
+          <Start>84.0000 0.0000</Start>
+          <Center>84.0000 6.0000</Center>
+          <End>90.0000 6.0000</End>
+        </Curve>
+        <Line>
+          <Start>90.0000 6.0000</Start>
+          <End>90.0000 240.0000</End>
+        </Line>
+        <Curve rot="cw" radius="6.0000" length="9.4248">
+          <Start>90.0000 234.0000</Start>
+          <Center>84.0000 234.0000</Center>
+          <End>84.0000 240.0000</End>
+        </Curve>
+        <Line>
+          <Start>84.0000 240.0000</Start>
+          <End>70.0000 240.0000</End>
+        </Line>
+        <Curve rot="cw" radius="6.0000" length="9.4248">
+          <Start>76.0000 240.0000</Start>
+          <Center>76.0000 234.0000</Center>
+          <End>70.0000 234.0000</End>
+        </Curve>
+        <Line>
+          <Start>70.0000 234.0000</Start>
+          <End>70.0000 0.0000</End>
+        </Line>
+        <Curve rot="cw" radius="6.0000" length="9.4248">
+          <Start>70.0000 6.0000</Start>
+          <Center>76.0000 6.0000</Center>
+          <End>76.0000 0.0000</End>
+        </Curve>
+        <Line>
+          <Start>76.0000 0.0000</Start>
+          <End>90.0000 0.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-109" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 134.0625</Start>
+          <End>160.0000 131.2500</End>
+        </Line>
+        <Line>
+          <Start>160.0000 131.2500</Start>
+          <End>0.0000 131.2500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 131.2500</Start>
+          <End>0.0000 134.0625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 134.0625</Start>
+          <End>160.0000 134.0625</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-110" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 136.8750</Start>
+          <End>160.0000 134.0625</End>
+        </Line>
+        <Line>
+          <Start>160.0000 134.0625</Start>
+          <End>0.0000 134.0625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 134.0625</Start>
+          <End>0.0000 136.8750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 136.8750</Start>
+          <End>160.0000 136.8750</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-111" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 139.6875</Start>
+          <End>160.0000 136.8750</End>
+        </Line>
+        <Line>
+          <Start>160.0000 136.8750</Start>
+          <End>0.0000 136.8750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 136.8750</Start>
+          <End>0.0000 139.6875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 139.6875</Start>
+          <End>160.0000 139.6875</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-112" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 142.5000</Start>
+          <End>160.0000 139.6875</End>
+        </Line>
+        <Line>
+          <Start>160.0000 139.6875</Start>
+          <End>0.0000 139.6875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 139.6875</Start>
+          <End>0.0000 142.5000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 142.5000</Start>
+          <End>160.0000 142.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-113" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 145.3125</Start>
+          <End>160.0000 142.5000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 142.5000</Start>
+          <End>0.0000 142.5000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 142.5000</Start>
+          <End>0.0000 145.3125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 145.3125</Start>
+          <End>160.0000 145.3125</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-114" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 148.1250</Start>
+          <End>160.0000 145.3125</End>
+        </Line>
+        <Line>
+          <Start>160.0000 145.3125</Start>
+          <End>0.0000 145.3125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 145.3125</Start>
+          <End>0.0000 148.1250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 148.1250</Start>
+          <End>160.0000 148.1250</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-115" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 150.9375</Start>
+          <End>160.0000 148.1250</End>
+        </Line>
+        <Line>
+          <Start>160.0000 148.1250</Start>
+          <End>0.0000 148.1250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 148.1250</Start>
+          <End>0.0000 150.9375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 150.9375</Start>
+          <End>160.0000 150.9375</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-116" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 153.7500</Start>
+          <End>160.0000 150.9375</End>
+        </Line>
+        <Line>
+          <Start>160.0000 150.9375</Start>
+          <End>0.0000 150.9375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 150.9375</Start>
+          <End>0.0000 153.7500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 153.7500</Start>
+          <End>160.0000 153.7500</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-117" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 156.5625</Start>
+          <End>160.0000 153.7500</End>
+        </Line>
+        <Line>
+          <Start>160.0000 153.7500</Start>
+          <End>0.0000 153.7500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 153.7500</Start>
+          <End>0.0000 156.5625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 156.5625</Start>
+          <End>160.0000 156.5625</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-118" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 159.3750</Start>
+          <End>160.0000 156.5625</End>
+        </Line>
+        <Line>
+          <Start>160.0000 156.5625</Start>
+          <End>0.0000 156.5625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 156.5625</Start>
+          <End>0.0000 159.3750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 159.3750</Start>
+          <End>160.0000 159.3750</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-119" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 162.1875</Start>
+          <End>160.0000 159.3750</End>
+        </Line>
+        <Line>
+          <Start>160.0000 159.3750</Start>
+          <End>0.0000 159.3750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 159.3750</Start>
+          <End>0.0000 162.1875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 162.1875</Start>
+          <End>160.0000 162.1875</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-120" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 165.0000</Start>
+          <End>160.0000 162.1875</End>
+        </Line>
+        <Line>
+          <Start>160.0000 162.1875</Start>
+          <End>0.0000 162.1875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 162.1875</Start>
+          <End>0.0000 165.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 165.0000</Start>
+          <End>160.0000 165.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-121" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 167.8125</Start>
+          <End>160.0000 165.0000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 165.0000</Start>
+          <End>0.0000 165.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 165.0000</Start>
+          <End>0.0000 167.8125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 167.8125</Start>
+          <End>160.0000 167.8125</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-122" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 170.6250</Start>
+          <End>160.0000 167.8125</End>
+        </Line>
+        <Line>
+          <Start>160.0000 167.8125</Start>
+          <End>0.0000 167.8125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 167.8125</Start>
+          <End>0.0000 170.6250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 170.6250</Start>
+          <End>160.0000 170.6250</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-123" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 173.4375</Start>
+          <End>160.0000 170.6250</End>
+        </Line>
+        <Line>
+          <Start>160.0000 170.6250</Start>
+          <End>0.0000 170.6250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 170.6250</Start>
+          <End>0.0000 173.4375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 173.4375</Start>
+          <End>160.0000 173.4375</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-124" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 176.2500</Start>
+          <End>160.0000 173.4375</End>
+        </Line>
+        <Line>
+          <Start>160.0000 173.4375</Start>
+          <End>0.0000 173.4375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 173.4375</Start>
+          <End>0.0000 176.2500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 176.2500</Start>
+          <End>160.0000 176.2500</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-125" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 179.0625</Start>
+          <End>160.0000 176.2500</End>
+        </Line>
+        <Line>
+          <Start>160.0000 176.2500</Start>
+          <End>0.0000 176.2500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 176.2500</Start>
+          <End>0.0000 179.0625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 179.0625</Start>
+          <End>160.0000 179.0625</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-126" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 181.8750</Start>
+          <End>160.0000 179.0625</End>
+        </Line>
+        <Line>
+          <Start>160.0000 179.0625</Start>
+          <End>0.0000 179.0625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 179.0625</Start>
+          <End>0.0000 181.8750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 181.8750</Start>
+          <End>160.0000 181.8750</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-127" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 184.6875</Start>
+          <End>160.0000 181.8750</End>
+        </Line>
+        <Line>
+          <Start>160.0000 181.8750</Start>
+          <End>0.0000 181.8750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 181.8750</Start>
+          <End>0.0000 184.6875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 184.6875</Start>
+          <End>160.0000 184.6875</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-128" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 187.5000</Start>
+          <End>160.0000 184.6875</End>
+        </Line>
+        <Line>
+          <Start>160.0000 184.6875</Start>
+          <End>0.0000 184.6875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 184.6875</Start>
+          <End>0.0000 187.5000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 187.5000</Start>
+          <End>160.0000 187.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-129" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 190.3125</Start>
+          <End>160.0000 187.5000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 187.5000</Start>
+          <End>0.0000 187.5000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 187.5000</Start>
+          <End>0.0000 190.3125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 190.3125</Start>
+          <End>160.0000 190.3125</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-130" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 193.1250</Start>
+          <End>160.0000 190.3125</End>
+        </Line>
+        <Line>
+          <Start>160.0000 190.3125</Start>
+          <End>0.0000 190.3125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 190.3125</Start>
+          <End>0.0000 193.1250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 193.1250</Start>
+          <End>160.0000 193.1250</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-131" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 195.9375</Start>
+          <End>160.0000 193.1250</End>
+        </Line>
+        <Line>
+          <Start>160.0000 193.1250</Start>
+          <End>0.0000 193.1250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 193.1250</Start>
+          <End>0.0000 195.9375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 195.9375</Start>
+          <End>160.0000 195.9375</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-132" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 198.7500</Start>
+          <End>160.0000 195.9375</End>
+        </Line>
+        <Line>
+          <Start>160.0000 195.9375</Start>
+          <End>0.0000 195.9375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 195.9375</Start>
+          <End>0.0000 198.7500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 198.7500</Start>
+          <End>160.0000 198.7500</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-133" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 201.5625</Start>
+          <End>160.0000 198.7500</End>
+        </Line>
+        <Line>
+          <Start>160.0000 198.7500</Start>
+          <End>0.0000 198.7500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 198.7500</Start>
+          <End>0.0000 201.5625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 201.5625</Start>
+          <End>160.0000 201.5625</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-134" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 204.3750</Start>
+          <End>160.0000 201.5625</End>
+        </Line>
+        <Line>
+          <Start>160.0000 201.5625</Start>
+          <End>0.0000 201.5625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 201.5625</Start>
+          <End>0.0000 204.3750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 204.3750</Start>
+          <End>160.0000 204.3750</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-135" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 207.1875</Start>
+          <End>160.0000 204.3750</End>
+        </Line>
+        <Line>
+          <Start>160.0000 204.3750</Start>
+          <End>0.0000 204.3750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 204.3750</Start>
+          <End>0.0000 207.1875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 207.1875</Start>
+          <End>160.0000 207.1875</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-136" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 210.0000</Start>
+          <End>160.0000 207.1875</End>
+        </Line>
+        <Line>
+          <Start>160.0000 207.1875</Start>
+          <End>0.0000 207.1875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 207.1875</Start>
+          <End>0.0000 210.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 210.0000</Start>
+          <End>160.0000 210.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-137" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 212.8125</Start>
+          <End>160.0000 210.0000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 210.0000</Start>
+          <End>0.0000 210.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 210.0000</Start>
+          <End>0.0000 212.8125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 212.8125</Start>
+          <End>160.0000 212.8125</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-138" area="449.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 215.6250</Start>
+          <End>160.0000 212.8125</End>
+        </Line>
+        <Line>
+          <Start>160.0000 212.8125</Start>
+          <End>0.0000 212.8125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 212.8125</Start>
+          <End>0.0000 215.6250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 215.6250</Start>
+          <End>160.0000 215.6250</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-139" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 218.4375</Start>
+          <End>160.0000 215.6250</End>
+        </Line>
+        <Line>
+          <Start>160.0000 215.6250</Start>
+          <End>0.0000 215.6250</End>
+        </Line>
+        <Line>
+          <Start>0.0000 215.6250</Start>
+          <End>0.0000 218.4375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 218.4375</Start>
+          <End>160.0000 218.4375</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-140" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 221.2500</Start>
+          <End>160.0000 218.4375</End>
+        </Line>
+        <Line>
+          <Start>160.0000 218.4375</Start>
+          <End>0.0000 218.4375</End>
+        </Line>
+        <Line>
+          <Start>0.0000 218.4375</Start>
+          <End>0.0000 221.2500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 221.2500</Start>
+          <End>160.0000 221.2500</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-141" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 224.0625</Start>
+          <End>160.0000 221.2500</End>
+        </Line>
+        <Line>
+          <Start>160.0000 221.2500</Start>
+          <End>0.0000 221.2500</End>
+        </Line>
+        <Line>
+          <Start>0.0000 221.2500</Start>
+          <End>0.0000 224.0625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 224.0625</Start>
+          <End>160.0000 224.0625</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-142" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 226.8750</Start>
+          <End>160.0000 224.0625</End>
+        </Line>
+        <Line>
+          <Start>160.0000 224.0625</Start>
+          <End>0.0000 224.0625</End>
+        </Line>
+        <Line>
+          <Start>0.0000 224.0625</Start>
+          <End>0.0000 226.8750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 226.8750</Start>
+          <End>160.0000 226.8750</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-143" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 229.6875</Start>
+          <End>160.0000 226.8750</End>
+        </Line>
+        <Line>
+          <Start>160.0000 226.8750</Start>
+          <End>0.0000 226.8750</End>
+        </Line>
+        <Line>
+          <Start>0.0000 226.8750</Start>
+          <End>0.0000 229.6875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 229.6875</Start>
+          <End>160.0000 229.6875</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-144" area="450.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 232.5000</Start>
+          <End>160.0000 229.6875</End>
+        </Line>
+        <Line>
+          <Start>160.0000 229.6875</Start>
+          <End>0.0000 229.6875</End>
+        </Line>
+        <Line>
+          <Start>0.0000 229.6875</Start>
+          <End>0.0000 232.5000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 232.5000</Start>
+          <End>160.0000 232.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-145" area="450.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>160.0000 235.3125</Start>
+          <End>160.0000 232.5000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 232.5000</Start>
+          <End>0.0000 232.5000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 232.5000</Start>
+          <End>0.0000 235.3125</End>
+        </Line>
+        <Line>
+          <Start>0.0000 235.3125</Start>
+          <End>160.0000 235.3125</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-146" area="749.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>0.0000 235.3125</Start>
+          <End>0.0000 240.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 240.0000</Start>
+          <End>160.0000 240.0000</End>
+        </Line>
+        <Line>
+          <Start>160.0000 240.0000</Start>
+          <End>160.0000 235.3125</End>
+        </Line>
+        <Line>
+          <Start>160.0000 235.3125</Start>
+          <End>0.0000 235.3125</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+  </Parcels>
+</LandXML>

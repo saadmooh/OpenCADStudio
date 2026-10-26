@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.2" version="1.2" date="2026-10-15">
+  <Units>
+    <Metric areaUnit="squareMeter" linearUnit="meter" />
+  </Units>
+  <Parcels>
+    <Parcel name="LOT-101" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>57.5000 37.5000</Start>
+          <End>57.5000 65.0000</End>
+        </Line>
+        <Line>
+          <Start>57.5000 65.0000</Start>
+          <End>80.0000 65.0000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 65.0000</Start>
+          <End>80.0000 37.5000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 37.5000</Start>
+          <End>57.5000 37.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-102" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>27.5000 37.5000</Start>
+          <End>27.5000 65.0000</End>
+        </Line>
+        <Line>
+          <Start>27.5000 65.0000</Start>
+          <End>50.0000 65.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 65.0000</Start>
+          <End>50.0000 37.5000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 37.5000</Start>
+          <End>27.5000 37.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-103" area="796.8750" desc="Zoning: Civic / Institutional, Owner: Ministry of Health, Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>103.7500 37.5000</Start>
+          <End>103.7500 75.0000</End>
+        </Line>
+        <Line>
+          <Start>103.7500 75.0000</Start>
+          <End>125.0000 75.0000</End>
+        </Line>
+        <Line>
+          <Start>125.0000 75.0000</Start>
+          <End>125.0000 37.5000</End>
+        </Line>
+        <Line>
+          <Start>125.0000 37.5000</Start>
+          <End>103.7500 37.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-104" area="1000.0000" desc="Zoning: Civic / Institutional, Owner: Municipality of Al-Waha, Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>132.5000 37.5000</Start>
+          <End>132.5000 77.5000</End>
+        </Line>
+        <Line>
+          <Start>132.5000 77.5000</Start>
+          <End>157.5000 77.5000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 77.5000</Start>
+          <End>157.5000 37.5000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 37.5000</Start>
+          <End>132.5000 37.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-105" area="690.6250" desc="Zoning: Civic / Institutional, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>103.7500 82.5000</Start>
+          <End>103.7500 115.0000</End>
+        </Line>
+        <Line>
+          <Start>103.7500 115.0000</Start>
+          <End>125.0000 115.0000</End>
+        </Line>
+        <Line>
+          <Start>125.0000 115.0000</Start>
+          <End>125.0000 82.5000</End>
+        </Line>
+        <Line>
+          <Start>125.0000 82.5000</Start>
+          <End>103.7500 82.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-106" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>57.5000 85.0000</Start>
+          <End>57.5000 112.5000</End>
+        </Line>
+        <Line>
+          <Start>57.5000 112.5000</Start>
+          <End>80.0000 112.5000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 112.5000</Start>
+          <End>80.0000 85.0000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 85.0000</Start>
+          <End>57.5000 85.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-107" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>27.5000 85.0000</Start>
+          <End>27.5000 112.5000</End>
+        </Line>
+        <Line>
+          <Start>27.5000 112.5000</Start>
+          <End>50.0000 112.5000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 112.5000</Start>
+          <End>50.0000 85.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 85.0000</Start>
+          <End>27.5000 85.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-108" area="675.0000" desc="Zoning: Civic / Institutional, Owner: Ministry of Interior / Police, Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>135.0000 85.0000</Start>
+          <End>135.0000 115.0000</End>
+        </Line>
+        <Line>
+          <Start>135.0000 115.0000</Start>
+          <End>157.5000 115.0000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 115.0000</Start>
+          <End>157.5000 85.0000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 85.0000</Start>
+          <End>135.0000 85.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-109" area="50350.0000" desc="Zoning: Open Space / Park, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>0.0000 0.0000</Start>
+          <End>0.0000 265.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 265.0000</Start>
+          <End>190.0000 265.0000</End>
+        </Line>
+        <Line>
+          <Start>190.0000 265.0000</Start>
+          <End>190.0000 0.0000</End>
+        </Line>
+        <Line>
+          <Start>190.0000 0.0000</Start>
+          <End>0.0000 0.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-110" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>57.5000 155.0000</Start>
+          <End>57.5000 182.5000</End>
+        </Line>
+        <Line>
+          <Start>57.5000 182.5000</Start>
+          <End>80.0000 182.5000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 182.5000</Start>
+          <End>80.0000 155.0000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 155.0000</Start>
+          <End>57.5000 155.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-111" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>27.5000 155.0000</Start>
+          <End>27.5000 182.5000</End>
+        </Line>
+        <Line>
+          <Start>27.5000 182.5000</Start>
+          <End>50.0000 182.5000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 182.5000</Start>
+          <End>50.0000 155.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 155.0000</Start>
+          <End>27.5000 155.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-112" area="1868.7500" desc="Zoning: Commercial / Retail, Owner: Al-Waha Commercial Real Estate, Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>125.0000 150.0000</Start>
+          <End>125.0000 207.5000</End>
+        </Line>
+        <Line>
+          <Start>125.0000 207.5000</Start>
+          <End>157.5000 207.5000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 207.5000</Start>
+          <End>157.5000 150.0000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 150.0000</Start>
+          <End>125.0000 150.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-113" area="1350.0000" desc="Zoning: Commercial / Retail, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>103.7500 150.0000</Start>
+          <End>103.7500 240.0000</End>
+        </Line>
+        <Line>
+          <Start>103.7500 240.0000</Start>
+          <End>118.7500 240.0000</End>
+        </Line>
+        <Line>
+          <Start>118.7500 240.0000</Start>
+          <End>118.7500 150.0000</End>
+        </Line>
+        <Line>
+          <Start>118.7500 150.0000</Start>
+          <End>103.7500 150.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-114" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>57.5000 202.5000</Start>
+          <End>57.5000 230.0000</End>
+        </Line>
+        <Line>
+          <Start>57.5000 230.0000</Start>
+          <End>80.0000 230.0000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 230.0000</Start>
+          <End>80.0000 202.5000</End>
+        </Line>
+        <Line>
+          <Start>80.0000 202.5000</Start>
+          <End>57.5000 202.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-115" area="618.7500" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>27.5000 202.5000</Start>
+          <End>27.5000 230.0000</End>
+        </Line>
+        <Line>
+          <Start>27.5000 230.0000</Start>
+          <End>50.0000 230.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 230.0000</Start>
+          <End>50.0000 202.5000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 202.5000</Start>
+          <End>27.5000 202.5000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="LOT-116" area="812.5000" desc="Zoning: Commercial / Retail, Owner: Retail Traders Cooperative, Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>125.0000 215.0000</Start>
+          <End>125.0000 240.0000</End>
+        </Line>
+        <Line>
+          <Start>125.0000 240.0000</Start>
+          <End>157.5000 240.0000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 240.0000</Start>
+          <End>157.5000 215.0000</End>
+        </Line>
+        <Line>
+          <Start>157.5000 215.0000</Start>
+          <End>125.0000 215.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+  </Parcels>
+</LandXML>

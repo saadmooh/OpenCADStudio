@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.2" version="1.2" date="2026-10-15">
+  <Units>
+    <Metric areaUnit="squareMeter" linearUnit="meter" />
+  </Units>
+  <Parcels>
+    <Parcel name="Lot_1" area="1000.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>50.0000 10.0000</Start>
+          <End>50.0000 0.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 0.0000</Start>
+          <End>0.0000 0.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 0.0000</Start>
+          <End>0.0000 10.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 10.0000</Start>
+          <End>0.0000 20.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 20.0000</Start>
+          <End>50.0000 20.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 20.0000</Start>
+          <End>50.0000 10.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="Lot_2" area="1000.0000" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>50.0000 40.0000</Start>
+          <End>50.0000 20.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 20.0000</Start>
+          <End>0.0000 20.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 20.0000</Start>
+          <End>0.0000 40.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 40.0000</Start>
+          <End>50.0000 40.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="Lot_3" area="2400.0001" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>0.0000 40.0000</Start>
+          <End>0.0000 76.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 76.0000</Start>
+          <End>50.0000 100.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 100.0000</Start>
+          <End>50.0000 40.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 40.0000</Start>
+          <End>0.0000 40.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+    <Parcel name="Lot_4" area="599.9999" desc="Zoning: Single-Family Residential, Owner: , Deed: ">
+      <CoordGeom>
+        <Line>
+          <Start>0.0000 76.0000</Start>
+          <End>0.0000 100.0000</End>
+        </Line>
+        <Line>
+          <Start>0.0000 100.0000</Start>
+          <End>50.0000 100.0000</End>
+        </Line>
+        <Line>
+          <Start>50.0000 100.0000</Start>
+          <End>0.0000 76.0000</End>
+        </Line>
+      </CoordGeom>
+    </Parcel>
+  </Parcels>
+</LandXML>
