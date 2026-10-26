@@ -285,7 +285,7 @@ fn offset_curved(
 
 // ── Dispatch ───────────────────────────────────────────────────────────────
 
-fn compute_offsets(entity: &EntityType, dist: f64, side_pt: Vec3) -> Vec<EntityType> {
+pub fn compute_offsets(entity: &EntityType, dist: f64, side_pt: Vec3) -> Vec<EntityType> {
     match entity {
         EntityType::Line(l) => offset_line(l, dist, side_pt).into_iter().collect(),
         EntityType::Circle(c) => offset_circle(c, dist, side_pt).into_iter().collect(),
@@ -305,12 +305,12 @@ fn compute_offsets(entity: &EntityType, dist: f64, side_pt: Vec3) -> Vec<EntityT
 // tessellated wire (point-to-segment), which approximates the perpendicular
 // distance for every supported entity type.
 
-fn perp_distance(entity: &EntityType, pt: Vec3) -> f64 {
+pub fn perp_distance(entity: &EntityType, pt: Vec3) -> f64 {
     closest_on_wire(entity, pt).map_or(0.0, |(_, d)| d)
 }
 
 /// Nearest point of the entity outline to `pt`, and its distance.
-fn closest_on_wire(entity: &EntityType, pt: Vec3) -> Option<([f64; 2], f64)> {
+pub fn closest_on_wire(entity: &EntityType, pt: Vec3) -> Option<([f64; 2], f64)> {
     let pts = entity_wire_pts(entity);
     if pts.len() < 2 {
         return None;
@@ -384,7 +384,7 @@ const PREVIEW_SEGMENTS_PER_RADIAN: f64 = kernel::geom2d::DEFAULT_SEGMENTS_PER_RA
 /// wire leaves `points_low` empty and accepts the loss, while the resident
 /// render path splits the `f64` into a high/low pair instead. Only a caller
 /// knows which of the two it is.
-fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
+pub fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
     // The two kinds with no finite point list of their own, so how far to run
     // them is a decision rather than a measurement. Long enough to read as
     // infinite at any working zoom; the committed entity renders true. A ray

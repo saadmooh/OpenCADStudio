@@ -1,8 +1,12 @@
 use crate::app::Message;
+use crate::i18n::lang_str;
 use crate::ui::style::form::{dialog_button, dialog_button_styled};
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
-use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space};
+use iced::widget::{
+    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
+    Space,
+};
 use iced::{Background, Border, Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 use std::borrow::Cow;
 
@@ -37,8 +41,8 @@ impl Default for ParcelLayoutToolsState {
             use_max_depth: false,
             max_depth: "80.00".to_string(),
             solution_preference: "Use shortest frontage".to_string(),
-            automatic_mode: false,
-            remainder_mode: "Place remainder in last parcel".to_string(),
+            automatic_mode: true,
+            remainder_mode: "Redistribute remainder".to_string(),
 
             active_tool: "Selection".to_string(),
             status_message: "Ready. Select a parcel boundary or pick a layout tool from the toolbar.".to_string(),
@@ -294,18 +298,21 @@ pub fn view_window<'a>(
     };
 
     let toolbar_row1 = row![
-        tool_btn("✏", "Create Lot", "create"),
-        tool_btn("↔", "Slide Line", "slide"),
-        tool_btn("🔄", "Swing Line", "swing"),
-        tool_btn("✂", "Split", "split"),
+        tool_btn("✏", lang_str("Create Lot", "رسم قطعة", "Créer lot"), "create"),
+        tool_btn("▭", lang_str("Rect Lot", "قطعة مستطيلة", "Lot rectangulaire"), "rect"),
+        tool_btn("↔", lang_str("Slide Line", "خط منزلق", "Ligne glissante"), "slide"),
+        tool_btn("🔄", lang_str("Swing Line", "خط متأرجح", "Ligne pivotante"), "swing"),
+        tool_btn("🔄✏", lang_str("Swing Edit", "تعديل التأرجح", "Modif. pivot"), "swing_edit"),
+        tool_btn("✂", lang_str("Split", "تقسيم", "Scinder"), "split"),
     ]
     .spacing(4);
 
     let toolbar_row2 = row![
-        tool_btn("⚡", "Auto Subdiv", "subdivide"),
-        tool_btn("🔗", "Merge", "merge"),
-        tool_btn("📐", "Setback", "setback"),
-        tool_btn("🎨", "Thematic", "thematic"),
+        tool_btn("⚡", lang_str("Auto Subdiv", "تقسيم تلقائي", "Subdiv. auto"), "subdivide"),
+        tool_btn("🔗", lang_str("Merge", "دمج", "Fusionner"), "merge"),
+        tool_btn("#", lang_str("Renumber", "إعادة الترقيم", "Renuméroter"), "renumber"),
+        tool_btn("📐", lang_str("Setback", "ارتداد", "Recul"), "setback"),
+        tool_btn("🎨", lang_str("Thematic", "تلوين", "Thématique"), "thematic"),
     ]
     .spacing(4);
 
@@ -339,35 +346,35 @@ pub fn view_window<'a>(
         .align_y(iced::Center)
     };
 
-    let min_area_row = field_input("Minimum Area:", "sq.m", &state.min_area, Message::ParcelLayoutMinAreaChanged);
-    let min_frontage_row = field_input("Minimum Frontage:", "m", &state.min_frontage, Message::ParcelLayoutMinFrontageChanged);
+    let min_area_row = field_input(lang_str("Minimum Area:", "الحد الأدنى للمساحة:", "Surface minimale:"), "sq.m", &state.min_area, Message::ParcelLayoutMinAreaChanged);
+    let min_frontage_row = field_input(lang_str("Minimum Frontage:", "الواجهة الدنيا:", "Façade minimale:"), "m", &state.min_frontage, Message::ParcelLayoutMinFrontageChanged);
 
     let offset_toggle_row = row![
         checkbox(state.use_offset)
             .on_toggle(Message::ParcelLayoutUseOffsetToggled)
             .size(14),
-        text("Use Min Frontage at Offset").size(11),
+        text(lang_str("Use Min Frontage at Offset", "اعتماد الواجهة عند الارتداد", "Façade min. au décalage")).size(11),
     ]
     .spacing(6)
     .align_y(iced::Center);
 
-    let frontage_offset_row = field_input("Frontage Offset:", "m", &state.frontage_offset, Message::ParcelLayoutOffsetChanged);
-    let min_width_row = field_input("Minimum Width:", "m", &state.min_width, Message::ParcelLayoutMinWidthChanged);
-    let min_depth_row = field_input("Minimum Depth:", "m", &state.min_depth, Message::ParcelLayoutMinDepthChanged);
+    let frontage_offset_row = field_input(lang_str("Frontage Offset:", "إزاحة خط الواجهة:", "Décalage de façade:"), "m", &state.frontage_offset, Message::ParcelLayoutOffsetChanged);
+    let min_width_row = field_input(lang_str("Minimum Width:", "الحد الأدنى للعرض:", "Largeur minimale:"), "m", &state.min_width, Message::ParcelLayoutMinWidthChanged);
+    let min_depth_row = field_input(lang_str("Minimum Depth:", "الحد الأدنى للعمق:", "Profondeur minimale:"), "m", &state.min_depth, Message::ParcelLayoutMinDepthChanged);
 
     let max_depth_toggle_row = row![
         checkbox(state.use_max_depth)
             .on_toggle(Message::ParcelLayoutUseMaxDepthToggled)
             .size(14),
-        text("Use Maximum Depth").size(11),
+        text(lang_str("Use Maximum Depth", "تحديد الحد الأقصى للعمق", "Utiliser profondeur maximale")).size(11),
     ]
     .spacing(6)
     .align_y(iced::Center);
 
-    let max_depth_row = field_input("Maximum Depth:", "m", &state.max_depth, Message::ParcelLayoutMaxDepthChanged);
+    let max_depth_row = field_input(lang_str("Maximum Depth:", "الحد الأقصى للعمق:", "Profondeur maximale:"), "m", &state.max_depth, Message::ParcelLayoutMaxDepthChanged);
 
     let sizing_group = group_box(
-        "Parcel Sizing Criteria",
+        lang_str("Parcel Sizing Criteria", "معايير مساحة وأبعاد القطعة", "Critères de dimensionnement"),
         column![
             min_area_row,
             min_frontage_row,
@@ -395,16 +402,16 @@ pub fn view_window<'a>(
     ];
 
     let pref_row = row![
-        text("Solution Preference:").size(11).width(130),
+        text(lang_str("Solution Preference:", "تفضيل الحل:", "Préférence de solution:")).size(11).width(130),
         pick_list(
             Some(state.solution_preference.clone()),
             pref_list,
-            |s| s.to_string(),
+            |s| crate::i18n::display_parcel_term(s),
         )
         .on_select(Message::ParcelLayoutPreferenceChanged)
         .text_size(10.5)
         .padding([3, 6])
-        .width(iced::Length::Fixed(180.0)),
+        .width(iced::Length::Fixed(190.0)),
     ]
     .spacing(6)
     .align_y(iced::Center);
@@ -413,28 +420,28 @@ pub fn view_window<'a>(
         checkbox(state.automatic_mode)
             .on_toggle(Message::ParcelLayoutAutoModeToggled)
             .size(14),
-        text("Automatic Mode (Subdivide entire site)").size(11),
+        text(lang_str("Automatic Mode (Subdivide entire site)", "الوضع التلقائي (تقسيم الموقع بالكامل)", "Mode automatique (Subdiviser tout le site)")).size(11),
     ]
     .spacing(6)
     .align_y(iced::Center);
 
     let remainder_row = row![
-        text("Remainder Distribution:").size(11).width(130),
+        text(lang_str("Remainder Distribution:", "توزيع المتبقي:", "Distribution du reliquat:")).size(11).width(130),
         pick_list(
             Some(state.remainder_mode.clone()),
             remainder_list,
-            |s| s.to_string(),
+            |s| crate::i18n::display_parcel_term(s),
         )
         .on_select(Message::ParcelLayoutRemainderChanged)
         .text_size(10.5)
         .padding([3, 6])
-        .width(iced::Length::Fixed(180.0)),
+        .width(iced::Length::Fixed(190.0)),
     ]
     .spacing(6)
     .align_y(iced::Center);
 
     let auto_group = group_box(
-        "Automatic Layout Criteria",
+        lang_str("Automatic Layout Criteria", "معايير التخطيط التلقائي", "Critères de disposition automatique"),
         column![pref_row, auto_toggle_row, remainder_row].spacing(6),
     );
 
@@ -470,7 +477,7 @@ pub fn view_window<'a>(
         });
 
     let right_column = group_box(
-        "Dynamic Illustration Preview (Real-Time)",
+        lang_str("Dynamic Illustration Preview (Real-Time)", "معاينة توضيحية مباشرة", "Aperçu dynamique en temps réel"),
         canvas_container,
     );
 
@@ -501,9 +508,9 @@ pub fn view_window<'a>(
     });
 
     // ── Bottom Action Buttons ─────────────────────────────────────────────
-    let apply_btn = dialog_button("Apply Criteria", Message::ParcelLayoutApply, true);
-    let close_btn = dialog_button_styled("Close", Message::ParcelLayoutClose, button::secondary);
-    let help_btn = dialog_button_styled("Help", Message::ParcelLayoutHelp, button::text);
+    let apply_btn = dialog_button(lang_str("Apply Criteria", "تطبيق المعايير", "Appliquer les critères"), Message::ParcelLayoutApply, true);
+    let close_btn = dialog_button_styled(lang_str("Close", "إغلاق", "Fermer"), Message::ParcelLayoutClose, button::secondary);
+    let help_btn = dialog_button_styled(lang_str("Help", "تعليمات", "Aide"), Message::ParcelLayoutHelp, button::text);
 
     let actions_row = row![
         help_btn,
@@ -532,5 +539,270 @@ pub fn view_window<'a>(
         .padding([12, 16])
         .width(sizing.width)
         .height(sizing.height)
+        .into()
+}
+
+/// Renders the modeless floating Civil 3D Parcel Layout Tools toolbar/palette on the viewport.
+/// Unlike modal dialogs, this palette does NOT have an opaque full-screen backdrop, allowing
+/// the user to interact with the drawing canvas, pick points, snap, and pan/zoom while it is open.
+pub fn view_floating_palette<'a>(
+    state: &'a ParcelLayoutToolsState,
+    collapsed: bool,
+) -> Element<'a, Message> {
+    // 1. Draggable title bar with 4 position shortcuts (↖ ↗ ↘ ↙), collapse toggle, and close
+    let drag_handle = mouse_area(
+        row![
+            text("✥").size(13),
+            text(lang_str("Parcel Layout Tools", "أدوات تخطيط قطع الأراضي", "Outils de disposition des parcelles"))
+                .size(11.5)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                }),
+            Space::new().width(Fill),
+        ]
+        .spacing(4)
+        .align_y(iced::Center),
+    )
+    .on_press(Message::ParcelPaletteDragStart)
+    .interaction(iced::mouse::Interaction::Grab);
+
+    let title_row = row![
+        drag_handle,
+        // Position shift buttons (4 corners)
+        button(text("↖").size(10))
+            .on_press(Message::ParcelPaletteMoveCorner(0))
+            .padding([1, 4])
+            .style(button::subtle),
+        button(text("↗").size(10))
+            .on_press(Message::ParcelPaletteMoveCorner(1))
+            .padding([1, 4])
+            .style(button::subtle),
+        button(text("↘").size(10))
+            .on_press(Message::ParcelPaletteMoveCorner(2))
+            .padding([1, 4])
+            .style(button::subtle),
+        button(text("↙").size(10))
+            .on_press(Message::ParcelPaletteMoveCorner(3))
+            .padding([1, 4])
+            .style(button::subtle),
+        // Collapse toggle
+        button(
+            text(if collapsed {
+                lang_str("▼ Sizing Criteria", "▼ معايير الأبعاد", "▼ Critères de dimensionnement")
+            } else {
+                lang_str("▲ Compact", "▲ مصغر", "▲ Compact")
+            })
+            .size(10.5),
+        )
+        .on_press(Message::ParcelLayoutToggleCollapse)
+        .padding([2, 6])
+        .style(button::subtle),
+        // Close button
+        button(text("✕").size(11))
+            .on_press(Message::ParcelLayoutClose)
+            .padding([2, 6])
+            .style(button::danger),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+
+    // 2. Action buttons row
+    let tool_btn = |icon: &'static str, label: &'static str, action: &'static str| {
+        let is_active = state.active_tool == action
+            || (action == "slide" && state.active_tool == "Slide Line")
+            || (action == "swing" && state.active_tool == "Swing Line")
+            || (action == "swing_edit" && state.active_tool == "Swing Edit");
+        button(
+            row![
+                text(icon).size(12),
+                text(label).size(11),
+            ]
+            .spacing(3)
+            .align_y(iced::Center)
+        )
+        .on_press(Message::ParcelLayoutAction(action.to_string()))
+        .style(move |theme: &Theme, status| {
+            let palette = theme.palette();
+            let pair = match (is_active, status) {
+                (true, _) => palette.primary.strong,
+                (false, button::Status::Hovered | button::Status::Pressed) => {
+                    palette.background.strong
+                }
+                _ => palette.background.weak,
+            };
+            button::Style {
+                background: Some(Background::Color(pair.color)),
+                text_color: pair.text,
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .padding([3, 6])
+    };
+
+    let tools_row = row![
+        tool_btn("✏", lang_str("Create", "رسم", "Créer"), "create"),
+        tool_btn("▭", lang_str("Rect Lot", "مستطيل", "Lot rect."), "rect"),
+        tool_btn("↔", lang_str("Slide Line", "منزلق", "Glissant"), "slide"),
+        tool_btn("🔄", lang_str("Swing", "متأرجح", "Pivotant"), "swing"),
+        tool_btn("🔄✏", lang_str("Swing Edit", "تعديل", "Modif."), "swing_edit"),
+        tool_btn("✂", lang_str("Split", "تقسيم", "Scinder"), "split"),
+        tool_btn("⚡", lang_str("Subdivide", "تجزئة", "Subdiviser"), "subdivide"),
+        tool_btn("🔗", lang_str("Merge", "دمج", "Fusionner"), "merge"),
+        tool_btn("#", lang_str("Renumber", "ترقيم", "Numéroter"), "renumber"),
+        tool_btn("📐", lang_str("Setback", "ارتداد", "Recul"), "setback"),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+
+    // 3. Status strip
+    let status_strip = row![
+        text("ℹ").size(11),
+        text(&state.status_message)
+            .size(10.5)
+            .style(crate::ui::style::common::muted_style),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+
+    let mut body = column![title_row, tools_row].spacing(6);
+
+    if !collapsed {
+        let field_input = |lbl: &'static str, unit: &'static str, val: &str, on_change: fn(String) -> Message| {
+            row![
+                text(lbl).size(10.5),
+                text_input("0.0", val)
+                    .on_input(on_change)
+                    .size(10.5)
+                    .padding([2, 4])
+                    .width(iced::Length::Fixed(60.0)),
+                text(unit).size(10.5),
+            ]
+            .spacing(3)
+            .align_y(iced::Center)
+        };
+
+        let criteria_row1 = row![
+            field_input(lang_str("Area:", "المساحة:", "Surface:"), "m²", &state.min_area, Message::ParcelLayoutMinAreaChanged),
+            field_input(lang_str("Frontage:", "الواجهة:", "Façade:"), "m", &state.min_frontage, Message::ParcelLayoutMinFrontageChanged),
+            field_input(lang_str("Width:", "العرض:", "Largeur:"), "m", &state.min_width, Message::ParcelLayoutMinWidthChanged),
+            field_input(lang_str("Depth:", "العمق:", "Profondeur:"), "m", &state.min_depth, Message::ParcelLayoutMinDepthChanged),
+        ]
+        .spacing(8)
+        .align_y(iced::Center);
+
+        let criteria_row2 = row![
+            checkbox(state.use_offset)
+                .on_toggle(Message::ParcelLayoutUseOffsetToggled)
+                .size(13),
+            text(lang_str("Offset:", "الارتداد:", "Décalage:")).size(10.5),
+            text_input("0.0", &state.frontage_offset)
+                .on_input(Message::ParcelLayoutOffsetChanged)
+                .size(10.5)
+                .padding([2, 4])
+                .width(iced::Length::Fixed(50.0)),
+            text("m").size(10.5),
+            Space::new().width(6),
+            checkbox(state.use_max_depth)
+                .on_toggle(Message::ParcelLayoutUseMaxDepthToggled)
+                .size(13),
+            text(lang_str("Max Depth:", "أقصى عمق:", "Prof. max:")).size(10.5),
+            text_input("0.0", &state.max_depth)
+                .on_input(Message::ParcelLayoutMaxDepthChanged)
+                .size(10.5)
+                .padding([2, 4])
+                .width(iced::Length::Fixed(50.0)),
+            text("m").size(10.5),
+            Space::new().width(6),
+            checkbox(state.automatic_mode)
+                .on_toggle(Message::ParcelLayoutAutoModeToggled)
+                .size(13),
+            text(lang_str("Auto Mode", "وضع تلقائي", "Mode auto")).size(10.5),
+        ]
+        .spacing(4)
+        .align_y(iced::Center);
+
+        let remainder_list = vec![
+            "Place remainder in last parcel".to_string(),
+            "Redistribute remainder".to_string(),
+            "Create remainder parcel".to_string(),
+        ];
+
+        let pref_list = vec![
+            "Use shortest frontage".to_string(),
+            "Use smallest area".to_string(),
+            "Use largest frontage".to_string(),
+        ];
+
+        let criteria_row3 = row![
+            text(lang_str("Remainder:", "المتبقي:", "Reliquat:")).size(10.5),
+            pick_list(
+                Some(state.remainder_mode.clone()),
+                remainder_list,
+                |s| crate::i18n::display_parcel_term(s),
+            )
+            .on_select(Message::ParcelLayoutRemainderChanged)
+            .text_size(10.0)
+            .padding([2, 4])
+            .width(iced::Length::Fixed(195.0)),
+            Space::new().width(8),
+            text(lang_str("Preference:", "التفضيل:", "Préférence:")).size(10.5),
+            pick_list(
+                Some(state.solution_preference.clone()),
+                pref_list,
+                |s| crate::i18n::display_parcel_term(s),
+            )
+            .on_select(Message::ParcelLayoutPreferenceChanged)
+            .text_size(10.0)
+            .padding([2, 4])
+            .width(iced::Length::Fixed(175.0)),
+        ]
+        .spacing(4)
+        .align_y(iced::Center);
+
+        let criteria_box = container(
+            column![criteria_row1, criteria_row2, criteria_row3].spacing(5)
+        )
+        .padding([6, 8])
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.weakest.color)),
+            border: Border {
+                width: 1.0,
+                radius: 3.0.into(),
+                color: theme.palette().background.neutral.color,
+            },
+            ..Default::default()
+        });
+
+        body = body.push(criteria_box);
+    }
+
+    body = body.push(status_strip);
+
+    container(body)
+        .padding([6, 8])
+        .width(iced::Length::Shrink)
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
+                border: Border {
+                    color: palette.primary.strong.color,
+                    width: 1.5,
+                    radius: 5.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                    offset: iced::Vector::new(0.0, 3.0),
+                    blur_radius: 10.0,
+                },
+                ..Default::default()
+            }
+        })
         .into()
 }

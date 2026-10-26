@@ -55,9 +55,16 @@ impl OpenCADStudio {
             Some(K::ParcelProperties) => self
                 .parcel_properties_state
                 .as_ref()
-                .map(|s| format!("Parcel Properties - {}", s.name))
-                .unwrap_or_else(|| "Parcel Properties".to_string()),
-            Some(K::ParcelLayoutTools) => "Parcel Layout Tools".to_string(),
+                .map(|s| format!("{} - {}", crate::t!("Parcel Properties"), s.name))
+                .unwrap_or_else(|| crate::t!("Parcel Properties").to_string()),
+            Some(K::ParcelLayoutTools) => crate::t!("Parcel Layout Tools").to_string(),
+            Some(K::ParcelStyles) => crate::i18n::lang_str("Parcel Zoning & Thematic Styles", "أنماط وتخصيص استخدامات الأراضي", "Styles et zonage thématique").to_string(),
+            Some(K::CreateParcelsLayout) => crate::t!("Create Parcels - Layout").to_string(),
+            Some(K::ProfileViewProperties) => self
+                .profile_view_properties_state
+                .as_ref()
+                .map(|s| format!("Profile View Properties - {}", s.view_id))
+                .unwrap_or_else(|| "Profile View Properties".to_string()),
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
             Some(K::LayerStateEditor) => crate::tr!("modal", "edit-layer-state"),
             Some(K::Plot) => crate::tr!("modal", "plot"),
@@ -437,6 +444,36 @@ impl OpenCADStudio {
                 sized_flow(ex, 720, 560, |flow| {
                     if let Some(state) = state {
                         crate::ui::window::parcel_layout_tools::view_window(state, flow)
+                    } else {
+                        iced::widget::Space::new().into()
+                    }
+                })
+            }
+            super::super::ModalKind::ParcelStyles => {
+                let state = self.parcel_styles_state.as_ref();
+                sized_flow(ex, 780, 560, |flow| {
+                    if let Some(state) = state {
+                        crate::ui::window::parcel_styles::view_window(state, flow)
+                    } else {
+                        iced::widget::Space::new().into()
+                    }
+                })
+            }
+            super::super::ModalKind::CreateParcelsLayout => {
+                let state = self.create_parcels_layout_state.as_ref();
+                sized_flow(ex, 440, 530, |flow| {
+                    if let Some(state) = state {
+                        crate::ui::window::create_parcels_layout::view_window(state, flow)
+                    } else {
+                        iced::widget::Space::new().into()
+                    }
+                })
+            }
+            super::super::ModalKind::ProfileViewProperties => {
+                let state = self.profile_view_properties_state.as_ref();
+                sized_flow(ex, 660, 540, |flow| {
+                    if let Some(state) = state {
+                        crate::ui::window::profile_view_properties::view_window(state, flow)
                     } else {
                         iced::widget::Space::new().into()
                     }

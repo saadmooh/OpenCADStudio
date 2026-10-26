@@ -407,6 +407,47 @@ pub fn view<'a>(
         }
     }
 
+    // ── Civil 3D Road Profile Views ───────────────────────────────────────
+    tree = tree.push(section_header("Civil 3D Road Profiles & Views".to_string()));
+
+    let pview_tools_btn = button(
+        row![
+            text("📐").size(11),
+            text("Profile Layout Tools (Floating)").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::OpenProfileLayoutTools)
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::primary);
+
+    let pview_props_btn = button(
+        row![
+            text("⚙").size(11),
+            text("Profile View Properties (Full)").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::OpenProfileViewProperties(None))
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::secondary);
+
+    let pview_create_btn = button(
+        row![
+            text("⊞").size(11),
+            text("Create Profile View Grid").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::StartProfileViewCreation)
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::secondary);
+
+    tree = tree.push(container(column![pview_tools_btn, pview_props_btn, pview_create_btn].spacing(3)).padding([2, 4]));
+
     let fls = featurelines(document);
     if !fls.is_empty() {
         tree = tree.push(section_header(format!("Feature Lines ({})", fls.len())));

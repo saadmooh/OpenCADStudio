@@ -987,6 +987,7 @@ impl OpenCADStudio {
         self.quick_properties = s.quick_properties;
         if crate::i18n::set_language(s.language).is_ok() {
             self.language = s.language;
+            self.ribbon.language = s.language;
         }
         self.cliprompt_lines = crate::app::settings::clamp_clipromptlines(s.cliprompt_lines);
         self.command_line
@@ -2090,6 +2091,7 @@ impl OpenCADStudio {
         if let Some(prepared) = prepared_geometry {
             self.tabs[i].scene.install_prepared_open_geometry(prepared);
         }
+        self.sync_dynamic_parcels_on_change(i, None);
         // Pay for the interaction index here, not on the first hover.
         self.tabs[i].scene.warm_interaction_caches();
         self.tabs[i]

@@ -1,5 +1,6 @@
 use crate::app::commands::civil_parcel::ParcelData;
 use crate::app::Message;
+use crate::i18n::lang_str;
 use crate::ui::style::form::{dialog_button, dialog_button_styled};
 use codec::Handle;
 use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space};
@@ -30,6 +31,13 @@ pub struct ParcelPropertiesState {
     pub zoning: String,
     pub object_locked: bool,
     pub show_tooltips: bool,
+
+    // Style & Label Configuration (Civil 3D)
+    pub area_label_style: String,
+    pub line_label_style: String,
+    pub curve_label_style: String,
+    pub auto_add_segment_labels: bool,
+    pub segment_layer: String,
 
     // Composition Tab (Legal & Ownership)
     pub owner: String,
@@ -99,21 +107,45 @@ impl ParcelPropertiesState {
             site: p.site_name.clone(),
             description: format!("Topological parcel '{}' in site '{}'", p.name, p.site_name),
             active_tab: ParcelPropertiesTab::Information,
-            selected_style: if p.layer.contains("RESIDENTIAL") {
-                "Single-Family Residential".to_string()
+            selected_style: if !p.zoning.is_empty() {
+                p.zoning.clone()
+            } else if p.layer.contains("RESIDENTIAL") {
+                "Single-Family".to_string()
             } else if p.layer.contains("COMMERCIAL") {
-                "Commercial / Retail".to_string()
+                "Commercial".to_string()
             } else if p.layer.contains("CIVIC") {
-                "Civic / Institutional".to_string()
+                "Civic".to_string()
             } else if p.layer.contains("PARK") {
                 "Park / Open Space".to_string()
             } else {
-                "Standard Parcel Style".to_string()
+                "Standard".to_string()
             },
             selected_layer: p.layer.clone(),
             zoning: p.zoning.clone(),
             object_locked: false,
             show_tooltips: true,
+
+            area_label_style: if !p.area_label_style.is_empty() {
+                p.area_label_style.clone()
+            } else {
+                "Parcel Name, Area & Perimeter".to_string()
+            },
+            line_label_style: if !p.line_label_style.is_empty() {
+                p.line_label_style.clone()
+            } else {
+                "Bearing over Distance".to_string()
+            },
+            curve_label_style: if !p.curve_label_style.is_empty() {
+                p.curve_label_style.clone()
+            } else {
+                "Distance over Radius".to_string()
+            },
+            auto_add_segment_labels: p.auto_add_segment_labels,
+            segment_layer: if !p.segment_layer.is_empty() {
+                p.segment_layer.clone()
+            } else {
+                "C-PROP-LINE".to_string()
+            },
 
             owner: p.owner.clone(),
             deed_no: p.deed_no.clone(),
@@ -210,10 +242,10 @@ pub fn view_window<'a>(
     };
 
     let tab_row = row![
-        tab_button(ParcelPropertiesTab::Information, "Information"),
-        tab_button(ParcelPropertiesTab::Composition, "Composition"),
-        tab_button(ParcelPropertiesTab::Analysis, "Analysis"),
-        tab_button(ParcelPropertiesTab::Statistics, "Statistics"),
+        tab_button(ParcelPropertiesTab::Information, lang_str("Information", "المعلومات العامة", "Informations")),
+        tab_button(ParcelPropertiesTab::Composition, lang_str("Composition", "الملكية والتركيب", "Composition")),
+        tab_button(ParcelPropertiesTab::Analysis, lang_str("Analysis", "التحليل والمطابقة", "Analyse")),
+        tab_button(ParcelPropertiesTab::Statistics, lang_str("Statistics", "البيانات والقياسات", "Statistiques")),
     ]
     .spacing(2)
     .width(Fill);
@@ -230,14 +262,38 @@ pub fn view_window<'a>(
 
     // ── Tab 1: Information (Civil 3D Layout) ──────────────────────────────
     let styles_list = vec![
-        "Single-Family Residential".to_string(),
-        "Multi-Family Residential".to_string(),
-        "Commercial / Retail".to_string(),
-        "Civic / Institutional".to_string(),
+        "Single-Family".to_string(),
+        "Commercial".to_string(),
+        "Civic".to_string(),
         "Park / Open Space".to_string(),
+        "Standard".to_string(),
+        "Property".to_string(),
+        "Multi-Family Residential".to_string(),
         "Industrial / Logistics".to_string(),
-        "Right-of-Way Corridor".to_string(),
-        "Standard Parcel Style".to_string(),
+    ];
+
+    let area_label_styles_list = vec![
+        "Parcel Name, Area & Perimeter".to_string(),
+        "Parcel Name & Area".to_string(),
+        "Name Only".to_string(),
+        "Area Only".to_string(),
+        "Square Meters & Acres".to_string(),
+    ];
+
+    let line_label_styles_list = vec![
+        "Bearing over Distance".to_string(),
+        "Distance Only".to_string(),
+        "Bearing Only".to_string(),
+        "None".to_string(),
+    ];
+
+    let curve_label_styles_list = vec![
+        "Distance over Radius".to_string(),
+        "Delta over Length".to_string(),
+        "Radius over Length".to_string(),
+        "Length Only".to_string(),
+        "Radius Only".to_string(),
+        "None".to_string(),
     ];
 
     let zoning_list = vec![
@@ -253,7 +309,7 @@ pub fn view_window<'a>(
     let information_view = {
         // Name and Number row
         let name_col = column![
-            text("Parcel Name:").size(11.5),
+            text(lang_str("Parcel Name:", "اسم قطعة الأرض:", "Nom de la parcelle:")).size(11.5),
             text_input("Parcel Name", &state.name)
                 .on_input(Message::ParcelPropertiesNameChanged)
                 .size(11.5)
@@ -264,7 +320,7 @@ pub fn view_window<'a>(
         .width(Fill);
 
         let num_col = column![
-            text("Parcel Number:").size(11.5),
+            text(lang_str("Parcel Number:", "رقم القطعة:", "Numéro de parcelle:")).size(11.5),
             text_input("1", &state.number.to_string())
                 .on_input(Message::ParcelPropertiesNumberChanged)
                 .size(11.5)
@@ -277,7 +333,7 @@ pub fn view_window<'a>(
 
         // Site Name
         let site_col = column![
-            text("Site:").size(11.5),
+            text(lang_str("Site:", "الموقع / المشروع:", "Site:")).size(11.5),
             text_input("Site 1", &state.site)
                 .on_input(Message::ParcelPropertiesSiteChanged)
                 .size(11.5)
@@ -288,7 +344,7 @@ pub fn view_window<'a>(
 
         // Description
         let desc_col = column![
-            text("Description:").size(11.5),
+            text(lang_str("Description:", "الوصف:", "Description:")).size(11.5),
             text_input("Description", &state.description)
                 .on_input(Message::ParcelPropertiesDescriptionChanged)
                 .size(11)
@@ -301,7 +357,7 @@ pub fn view_window<'a>(
         let style_picker = pick_list(
             Some(state.selected_style.clone()),
             styles_list,
-            |s| s.to_string(),
+            |s| crate::i18n::display_parcel_term(s),
         )
         .on_select(Message::ParcelPropertiesStyleChanged)
         .text_size(11)
@@ -309,11 +365,113 @@ pub fn view_window<'a>(
         .width(Fill);
 
         let style_row = row![
-            row![text("📐").size(12), text("Parcel style:").size(11.5)]
+            row![text("📐").size(12), text(lang_str("Parcel style:", "نمط قطعة الأرض:", "Style de parcelle:")).size(11.5)]
                 .spacing(4)
-                .width(110)
+                .width(130)
                 .align_y(iced::Center),
             style_picker,
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
+
+        // Parcel Layer
+        let layer_row = row![
+            row![text("📑").size(12), text(lang_str("Parcel CAD layer:", "طبقة الكاد:", "Calque CAO:")).size(11.5)]
+                .spacing(4)
+                .width(130)
+                .align_y(iced::Center),
+            text_input("Parcel Layer", &state.selected_layer)
+                .on_input(Message::ParcelPropertiesLayerChanged)
+                .size(11)
+                .padding([4, 6])
+                .width(Fill),
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
+
+        // Area Label Style picker
+        let area_style_picker = pick_list(
+            Some(state.area_label_style.clone()),
+            area_label_styles_list,
+            |s| crate::i18n::display_parcel_term(s),
+        )
+        .on_select(Message::ParcelPropertiesAreaLabelStyleChanged)
+        .text_size(11)
+        .padding([4, 6])
+        .width(Fill);
+
+        let area_style_row = row![
+            row![text("🏷").size(12), text(lang_str("Area label style:", "نمط نص المساحة والاسم:", "Style d'étiquette de surface:")).size(11.5)]
+                .spacing(4)
+                .width(130)
+                .align_y(iced::Center),
+            area_style_picker,
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
+
+        // Line Label Style picker
+        let line_style_picker = pick_list(
+            Some(state.line_label_style.clone()),
+            line_label_styles_list,
+            |s| crate::i18n::display_parcel_term(s),
+        )
+        .on_select(Message::ParcelPropertiesLineLabelStyleChanged)
+        .text_size(11)
+        .padding([4, 6])
+        .width(Fill);
+
+        let line_style_row = row![
+            row![text("📏").size(12), text(lang_str("Line label style:", "نمط نص الخطوط:", "Style d'étiquette de ligne:")).size(11.5)]
+                .spacing(4)
+                .width(130)
+                .align_y(iced::Center),
+            line_style_picker,
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
+
+        // Curve Label Style picker
+        let curve_style_picker = pick_list(
+            Some(state.curve_label_style.clone()),
+            curve_label_styles_list,
+            |s| crate::i18n::display_parcel_term(s),
+        )
+        .on_select(Message::ParcelPropertiesCurveLabelStyleChanged)
+        .text_size(11)
+        .padding([4, 6])
+        .width(Fill);
+
+        let curve_style_row = row![
+            row![text("⌒").size(12), text(lang_str("Curve label style:", "نمط نص المنحنيات:", "Style d'étiquette de courbe:")).size(11.5)]
+                .spacing(4)
+                .width(130)
+                .align_y(iced::Center),
+            curve_style_picker,
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
+
+        // Auto Add Segment Labels Checkbox & Layer
+        let auto_seg_check = row![
+            checkbox(state.auto_add_segment_labels)
+                .on_toggle(Message::ParcelPropertiesToggleSegmentLabels)
+                .size(14),
+            text(lang_str("Automatically add boundary segment labels", "إضافة نصوص أضلاع الحدود تلقائياً", "Ajouter automatiquement les étiquettes")).size(11.5),
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
+
+        let seg_layer_row = row![
+            row![text("🔤").size(12), text(lang_str("Segment layer:", "طبقة أضلاع القطعة:", "Calque des segments:")).size(11.5)]
+                .spacing(4)
+                .width(130)
+                .align_y(iced::Center),
+            text_input("Segment Layer", &state.segment_layer)
+                .on_input(Message::ParcelPropertiesSegmentLayerChanged)
+                .size(11)
+                .padding([4, 6])
+                .width(Fill),
         ]
         .spacing(6)
         .align_y(iced::Center);
@@ -322,7 +480,7 @@ pub fn view_window<'a>(
         let zoning_picker = pick_list(
             Some(state.zoning.clone()),
             zoning_list,
-            |s| s.to_string(),
+            |s| crate::i18n::display_parcel_term(s),
         )
         .on_select(Message::ParcelPropertiesZoningChanged)
         .text_size(11)
@@ -344,9 +502,9 @@ pub fn view_window<'a>(
             });
 
         let zoning_row = row![
-            row![text("🏷").size(12), text("Zoning code:").size(11.5)]
+            row![text("🏛").size(12), text(lang_str("Zoning code:", "رمز التنظيم والتخصيص:", "Code de zonage:")).size(11.5)]
                 .spacing(4)
-                .width(110)
+                .width(130)
                 .align_y(iced::Center),
             zoning_picker,
             swatch,
@@ -355,15 +513,26 @@ pub fn view_window<'a>(
         .align_y(iced::Center);
 
         let styles_group = group_box(
-            "Styles & Zoning Classification",
-            column![style_row, zoning_row].spacing(10).padding([4, 2]),
+            lang_str("Civil 3D Styles & Annotation Labels", "أنماط Civil 3D ونصوص البيانات", "Styles Civil 3D & Étiquettes"),
+            column![
+                style_row,
+                layer_row,
+                area_style_row,
+                line_style_row,
+                curve_style_row,
+                auto_seg_check,
+                seg_layer_row,
+                zoning_row,
+            ]
+            .spacing(8)
+            .padding([4, 2]),
         );
 
         let lock_check = row![
             checkbox(state.object_locked)
                 .on_toggle(|_| Message::ParcelPropertiesToggleLocked)
                 .size(14),
-            text("Object locked (protect from layout tools)").size(11.5),
+            text(lang_str("Object locked (protect from layout tools)", "قفل العنصر (حماية من التعديل التلقائي)", "Objet verrouillé (protéger des outils)")).size(11.5),
         ]
         .spacing(6)
         .align_y(iced::Center);
@@ -372,7 +541,7 @@ pub fn view_window<'a>(
             checkbox(state.show_tooltips)
                 .on_toggle(|_| Message::ParcelPropertiesToggleTooltips)
                 .size(14),
-            text("Show parcel hover tooltips & area callouts").size(11.5),
+            text(lang_str("Show parcel hover tooltips & area callouts", "إظهار تلميحات المرور وتسميات المساحة", "Afficher les info-bulles au survol")).size(11.5),
         ]
         .spacing(6)
         .align_y(iced::Center);
@@ -405,20 +574,24 @@ pub fn view_window<'a>(
         };
 
         let legal_col = column![
-            field_row("Legal Owner:", &state.owner, Message::ParcelPropertiesOwnerChanged),
-            field_row("Deed Reference:", &state.deed_no, Message::ParcelPropertiesDeedChanged),
-            field_row("Tax Parcel ID (PIN):", &state.tax_id, Message::ParcelPropertiesTaxIdChanged),
-            field_row("Street Address:", &state.address, Message::ParcelPropertiesAddressChanged),
-            field_row("Assessment Value:", &state.assessment_val, Message::ParcelPropertiesAssessmentChanged),
-            field_row("Land Use Category:", &state.land_use, Message::ParcelPropertiesLandUseChanged),
+            field_row(lang_str("Legal Owner:", "المالك القانوني:", "Propriétaire légal:"), &state.owner, Message::ParcelPropertiesOwnerChanged),
+            field_row(lang_str("Deed Reference:", "رقم صك الملكية:", "Réf. de l'acte:"), &state.deed_no, Message::ParcelPropertiesDeedChanged),
+            field_row(lang_str("Tax Parcel ID (PIN):", "الرقم الضريبي (PIN):", "ID fiscal (PIN):"), &state.tax_id, Message::ParcelPropertiesTaxIdChanged),
+            field_row(lang_str("Street Address:", "عنوان العقار / الشارع:", "Adresse physique:"), &state.address, Message::ParcelPropertiesAddressChanged),
+            field_row(lang_str("Assessment Value:", "القيمة التقديرية للأرض:", "Valeur fiscale estimée:"), &state.assessment_val, Message::ParcelPropertiesAssessmentChanged),
+            field_row(lang_str("Land Use Category:", "فئة استخدام الأرض:", "Catégorie d'utilisation:"), &state.land_use, Message::ParcelPropertiesLandUseChanged),
         ]
         .spacing(8);
 
-        let legal_group = group_box("Legal Identity & Tax Assessment", legal_col);
+        let legal_group = group_box(lang_str("Legal Identity & Tax Assessment", "البيانات القانونية والتقييم العقاري", "Identité juridique & Évaluation"), legal_col);
 
-        let note = text("Ownership and deed data are preserved in the drawing via CAD Extended Data (XDATA OPENCAD_PARCEL).")
-            .size(10.5)
-            .style(crate::ui::style::common::muted_style);
+        let note = text(lang_str(
+            "Ownership and deed data are preserved in the drawing via CAD Extended Data (XDATA OPENCAD_PARCEL).",
+            "تُحفظ بيانات الملكية والصك في ملف الرسم عبر البيانات الموسعة XDATA OPENCAD_PARCEL.",
+            "Les données de propriété sont conservées via les données étendues XDATA OPENCAD_PARCEL."
+        ))
+        .size(10.5)
+        .style(crate::ui::style::common::muted_style);
 
         column![legal_group, note].spacing(10).width(Fill)
     };
@@ -440,16 +613,16 @@ pub fn view_window<'a>(
         };
 
         let mapcheck_col = column![
-            mapcheck_row("Error of Closure:", format!("{:.5} m", state.mapcheck_closure_error), state.mapcheck_closure_error < 0.01),
-            mapcheck_row("Closure Bearing:", state.mapcheck_bearing.clone(), true),
-            mapcheck_row("Traverse Precision Ratio:", state.mapcheck_precision.clone(), state.mapcheck_passed),
-            mapcheck_row("Traverse Closure Criteria:", if state.mapcheck_passed { "PASSED (Class 1 Cadastral)" } else { "EXCEEDS TOLERANCE" }.to_string(), state.mapcheck_passed),
-            mapcheck_row("Perimeter Traverse Length:", format!("{:.2} m", state.perimeter), true),
-            mapcheck_row("Mathematical Area Check:", format!("{:.2} m²", state.area_2d), true),
+            mapcheck_row(lang_str("Error of Closure:", "خطأ الإغلاق:", "Erreur de fermeture:"), format!("{:.5} m", state.mapcheck_closure_error), state.mapcheck_closure_error < 0.01),
+            mapcheck_row(lang_str("Closure Bearing:", "اتجاه خطأ الإغلاق:", "Gisement de fermeture:"), state.mapcheck_bearing.clone(), true),
+            mapcheck_row(lang_str("Traverse Precision Ratio:", "نسبة دقة المضلع:", "Rapport de précision:"), state.mapcheck_precision.clone(), state.mapcheck_passed),
+            mapcheck_row(lang_str("Traverse Closure Criteria:", "معيار دقة إغلاق المضلع:", "Critère de fermeture:"), if state.mapcheck_passed { lang_str("PASSED (Class 1 Cadastral)", "ناجح (مطابق للمساحة الطبوغرافية)", "RÉUSSI (Classe 1 Cadastrale)") } else { lang_str("EXCEEDS TOLERANCE", "يتجاوز التفاوت المسموح", "HORS TOLÉRANCE") }.to_string(), state.mapcheck_passed),
+            mapcheck_row(lang_str("Perimeter Traverse Length:", "طول محيط المضلع:", "Périmètre du cheminement:"), format!("{:.2} m", state.perimeter), true),
+            mapcheck_row(lang_str("Mathematical Area Check:", "التحقق الرياضي من المساحة:", "Contrôle de surface:"), format!("{:.2} m²", state.area_2d), true),
         ]
         .spacing(6);
 
-        let mapcheck_group = group_box("Civil 3D Mapcheck Boundary Closure Analysis", mapcheck_col);
+        let mapcheck_group = group_box(lang_str("Civil 3D Mapcheck Boundary Closure Analysis", "تحليل إغلاق الحدود الهندسية (Mapcheck)", "Analyse de fermeture de limite (Mapcheck)"), mapcheck_col);
 
         let thematic_swatch = container(Space::new().width(32).height(24))
             .style({
@@ -467,7 +640,7 @@ pub fn view_window<'a>(
 
         let thematic_info = column![
             row![
-                text("Active Zoning Color:").size(11).width(140),
+                text(lang_str("Active Zoning Color:", "لون التخصيص النشط:", "Couleur de zonage:")).size(11).width(140),
                 thematic_swatch,
                 text(format!("Hex: #{:02X}{:02X}{:02X}",
                     (state.thematic_color.r * 255.0) as u8,
@@ -478,7 +651,7 @@ pub fn view_window<'a>(
             .spacing(8)
             .align_y(iced::Center),
             row![
-                text("Hatch Fill Pattern:").size(11).width(140),
+                text(lang_str("Hatch Fill Pattern:", "نمط التهشير (Hatch):", "Motif de hachure:")).size(11).width(140),
                 pick_list(
                     Some(state.hatch_pattern.clone()),
                     vec!["SOLID".to_string(), "ANSI31".to_string(), "NET".to_string(), "CROSS".to_string(), "NONE".to_string()],
@@ -494,7 +667,7 @@ pub fn view_window<'a>(
         ]
         .spacing(8);
 
-        let thematic_group = group_box("Thematic Zoning Hatching & Display", thematic_info);
+        let thematic_group = group_box(lang_str("Thematic Zoning Hatching & Display", "عرض وتلوين التخصيص العقاري", "Hachures & affichage du zonage"), thematic_info);
 
         column![mapcheck_group, thematic_group].spacing(10).width(Fill)
     };
@@ -515,28 +688,28 @@ pub fn view_window<'a>(
         let area_sqft = state.area_2d * 10.7639;
 
         let general_col = column![
-            stat_row("Parcel Handle:", format!("{:X}", state.handle.value())),
-            stat_row("2D Projected Area:", format!("{:.2} m² ({:.4} ha)", state.area_2d, state.area_2d / 10000.0)),
-            stat_row("Imperial Area:", format!("{:.1} sq.ft ({:.3} acres)", area_sqft, area_acres)),
-            stat_row("Boundary Perimeter:", format!("{:.2} m", state.perimeter)),
-            stat_row("Boundary Segments:", format!("{} vertices / segments", state.segment_count)),
+            stat_row(lang_str("Parcel Handle:", "معرّف الكائن (Handle):", "Handle de l'entité:"), format!("{:X}", state.handle.value())),
+            stat_row(lang_str("2D Projected Area:", "المساحة المسقطة 2D:", "Surface projetée 2D:"), format!("{:.2} m² ({:.4} ha)", state.area_2d, state.area_2d / 10000.0)),
+            stat_row(lang_str("Imperial Area:", "المساحة بالوحدات الإمبراطورية:", "Surface impériale:"), format!("{:.1} sq.ft ({:.3} acres)", area_sqft, area_acres)),
+            stat_row(lang_str("Boundary Perimeter:", "محيط الحدود:", "Périmètre:"), format!("{:.2} m", state.perimeter)),
+            stat_row(lang_str("Boundary Segments:", "أضلاع الحدود:", "Segments de limite:"), format!("{} {}", state.segment_count, lang_str("vertices / segments", "نقاط / أضلاع", "sommets / segments"))),
         ]
         .spacing(4);
 
         let geom_col = column![
-            stat_row("Centroid Coordinates (X, Y):", format!("{:.3}, {:.3}", state.centroid_x, state.centroid_y)),
-            stat_row("Bounding Box Min (X, Y):", format!("{:.3}, {:.3}", state.min_x, state.min_y)),
-            stat_row("Bounding Box Max (X, Y):", format!("{:.3}, {:.3}", state.max_x, state.max_y)),
-            stat_row("Width (ΔX):", format!("{:.2} m", (state.max_x - state.min_x).abs())),
-            stat_row("Depth (ΔY):", format!("{:.2} m", (state.max_y - state.min_y).abs())),
-            stat_row("Aspect Ratio (Width / Depth):", format!("{:.2}", state.aspect_ratio)),
-            stat_row("CAD Layer:", state.selected_layer.clone()),
+            stat_row(lang_str("Centroid Coordinates (X, Y):", "إحداثيات مركز الثقل (X, Y):", "Barycentre (X, Y):"), format!("{:.3}, {:.3}", state.centroid_x, state.centroid_y)),
+            stat_row(lang_str("Bounding Box Min (X, Y):", "أدنى إحداثيات (Min X, Y):", "Boîte englobante Min (X, Y):"), format!("{:.3}, {:.3}", state.min_x, state.min_y)),
+            stat_row(lang_str("Bounding Box Max (X, Y):", "أقصى إحداثيات (Max X, Y):", "Boîte englobante Max (X, Y):"), format!("{:.3}, {:.3}", state.max_x, state.max_y)),
+            stat_row(lang_str("Width (ΔX):", "العرض (ΔX):", "Largeur (ΔX):"), format!("{:.2} m", (state.max_x - state.min_x).abs())),
+            stat_row(lang_str("Depth (ΔY):", "العمق (ΔY):", "Profondeur (ΔY):"), format!("{:.2} m", (state.max_y - state.min_y).abs())),
+            stat_row(lang_str("Aspect Ratio (Width / Depth):", "نسبة العرض إلى العمق:", "Rapport de forme (L/P):"), format!("{:.2}", state.aspect_ratio)),
+            stat_row(lang_str("CAD Layer:", "طبقة الكاد:", "Calque CAO:"), state.selected_layer.clone()),
         ]
         .spacing(4);
 
         column![
-            group_box("General Geometric Statistics", general_col),
-            group_box("Spatial Bounding & Orientation", geom_col),
+            group_box(lang_str("General Geometric Statistics", "البيانات الهندسية العامة", "Statistiques géométriques générales"), general_col),
+            group_box(lang_str("Spatial Bounding & Orientation", "الحدود المكانية والاتجاهات", "Limites spatiales & orientation"), geom_col),
         ]
         .spacing(10)
         .width(Fill)
@@ -551,13 +724,15 @@ pub fn view_window<'a>(
     };
 
     // ── Dialog Bottom Action Buttons ──────────────────────────────────────
-    let ok_btn = dialog_button("OK", Message::ParcelPropertiesOk, true);
-    let cancel_btn = dialog_button("Cancel", Message::ParcelPropertiesClose, false);
-    let apply_btn = dialog_button_styled("Apply", Message::ParcelPropertiesApply, button::secondary);
-    let help_btn = dialog_button_styled("Help", Message::ParcelPropertiesHelp, button::text);
+    let ok_btn = dialog_button(lang_str("OK", "موافق", "OK"), Message::ParcelPropertiesOk, true);
+    let cancel_btn = dialog_button(lang_str("Cancel", "إلغاء", "Annuler"), Message::ParcelPropertiesClose, false);
+    let apply_btn = dialog_button_styled(lang_str("Apply", "تطبيق", "Appliquer"), Message::ParcelPropertiesApply, button::secondary);
+    let help_btn = dialog_button_styled(lang_str("Help", "تعليمات", "Aide"), Message::ParcelPropertiesHelp, button::text);
+    let tools_btn = dialog_button_styled(lang_str("⚡ Parcel Layout Tools", "⚡ أدوات التخطيط", "⚡ Outils de disposition"), Message::OpenParcelLayoutTools, button::secondary);
 
     let actions_row = row![
         help_btn,
+        tools_btn,
         Space::new().width(Fill),
         ok_btn,
         cancel_btn,
