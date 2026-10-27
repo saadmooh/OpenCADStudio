@@ -7482,19 +7482,7 @@ impl OpenCADStudio {
                     self.active_modal = None;
                     self.show_parcel_layout_tools = true;
                     let criteria = if let Some(st) = &self.parcel_layout_state {
-                        crate::app::commands::parcel_interactive::ParcelSizingCriteria {
-                            min_area: st.min_area.parse::<f64>().unwrap_or(350.0),
-                            min_frontage: st.min_frontage.parse::<f64>().unwrap_or(12.0),
-                            use_offset: st.use_offset,
-                            frontage_offset: st.frontage_offset.parse::<f64>().unwrap_or(4.0),
-                            min_width: st.min_width.parse::<f64>().unwrap_or(10.0),
-                            min_depth: st.min_depth.parse::<f64>().unwrap_or(20.0),
-                            use_max_depth: st.use_max_depth,
-                            max_depth: st.max_depth.parse::<f64>().unwrap_or(80.0),
-                            solution_preference: st.solution_preference.clone(),
-                            automatic_mode: st.automatic_mode,
-                            remainder_mode: st.remainder_mode.clone(),
-                        }
+                        crate::app::commands::parcel_interactive::ParcelSizingCriteria::from_state(st)
                     } else {
                         crate::app::commands::parcel_interactive::ParcelSizingCriteria::default()
                     };
@@ -7510,15 +7498,12 @@ impl OpenCADStudio {
                 } else if action == "swing" {
                     self.active_modal = None;
                     self.show_parcel_layout_tools = true;
-                    let (min_area, min_frontage) = if let Some(st) = &self.parcel_layout_state {
-                        (
-                            st.min_area.parse::<f64>().unwrap_or(350.0),
-                            st.min_frontage.parse::<f64>().unwrap_or(12.0),
-                        )
+                    let criteria = if let Some(st) = &self.parcel_layout_state {
+                        crate::app::commands::parcel_interactive::ParcelSizingCriteria::from_state(st)
                     } else {
-                        (350.0, 12.0)
+                        crate::app::commands::parcel_interactive::ParcelSizingCriteria::default()
                     };
-                    let cmd_obj = crate::app::commands::parcel_interactive::SwingLineCommand::new(min_area, min_frontage);
+                    let cmd_obj = crate::app::commands::parcel_interactive::SwingLineCommand::new_with_criteria(criteria);
                     self.command_line.push_info(&cmd_obj.prompt());
                     let i = self.active_tab;
                     self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
@@ -7544,15 +7529,12 @@ impl OpenCADStudio {
                 } else if action == "swing_edit" {
                     self.active_modal = None;
                     self.show_parcel_layout_tools = true;
-                    let (min_area, min_frontage) = if let Some(st) = &self.parcel_layout_state {
-                        (
-                            st.min_area.parse::<f64>().unwrap_or(350.0),
-                            st.min_frontage.parse::<f64>().unwrap_or(12.0),
-                        )
+                    let criteria = if let Some(st) = &self.parcel_layout_state {
+                        crate::app::commands::parcel_interactive::ParcelSizingCriteria::from_state(st)
                     } else {
-                        (350.0, 12.0)
+                        crate::app::commands::parcel_interactive::ParcelSizingCriteria::default()
                     };
-                    let cmd_obj = crate::app::commands::parcel_interactive::SwingLineEditCommand::new(min_area, min_frontage);
+                    let cmd_obj = crate::app::commands::parcel_interactive::SwingLineEditCommand::new_with_criteria(criteria);
                     self.command_line.push_info(&cmd_obj.prompt());
                     let i = self.active_tab;
                     self.tabs[i].active_cmd = Some(Box::new(cmd_obj));

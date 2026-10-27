@@ -238,25 +238,12 @@ impl OpenCADStudio {
 
         {
 
-            let (min_area, min_frontage, frontage_offset) = if let Some(st) = &self.parcel_layout_state {
-
-                (
-
-                    st.min_area.parse::<f64>().unwrap_or(350.0),
-
-                    st.min_frontage.parse::<f64>().unwrap_or(12.0),
-
-                    st.frontage_offset.parse::<f64>().unwrap_or(4.0),
-
-                )
-
+            let criteria = if let Some(st) = &self.parcel_layout_state {
+                parcel_interactive::ParcelSizingCriteria::from_state(st)
             } else {
-
-                (350.0, 12.0, 4.0)
-
+                parcel_interactive::ParcelSizingCriteria::default()
             };
-
-            let cmd_obj = parcel_interactive::SlideLineCommand::new(min_area, min_frontage, frontage_offset);
+            let cmd_obj = parcel_interactive::SlideLineCommand::new_with_criteria(criteria);
 
             self.command_line.record_recent(cmd);
 
@@ -362,23 +349,12 @@ impl OpenCADStudio {
 
         {
 
-            let (min_area, min_frontage) = if let Some(st) = &self.parcel_layout_state {
-
-                (
-
-                    st.min_area.parse::<f64>().unwrap_or(350.0),
-
-                    st.min_frontage.parse::<f64>().unwrap_or(12.0),
-
-                )
-
+            let criteria = if let Some(st) = &self.parcel_layout_state {
+                parcel_interactive::ParcelSizingCriteria::from_state(st)
             } else {
-
-                (350.0, 12.0)
-
+                parcel_interactive::ParcelSizingCriteria::default()
             };
-
-            let cmd_obj = parcel_interactive::SwingLineCommand::new(min_area, min_frontage);
+            let cmd_obj = parcel_interactive::SwingLineCommand::new_with_criteria(criteria);
 
             self.command_line.record_recent(cmd);
 
@@ -414,23 +390,12 @@ impl OpenCADStudio {
 
         {
 
-            let (min_area, min_frontage) = if let Some(st) = &self.parcel_layout_state {
-
-                (
-
-                    st.min_area.parse::<f64>().unwrap_or(350.0),
-
-                    st.min_frontage.parse::<f64>().unwrap_or(12.0),
-
-                )
-
+            let criteria = if let Some(st) = &self.parcel_layout_state {
+                parcel_interactive::ParcelSizingCriteria::from_state(st)
             } else {
-
-                (350.0, 12.0)
-
+                parcel_interactive::ParcelSizingCriteria::default()
             };
-
-            let cmd_obj = parcel_interactive::SwingLineEditCommand::new(min_area, min_frontage);
+            let cmd_obj = parcel_interactive::SwingLineEditCommand::new_with_criteria(criteria);
 
             self.command_line.record_recent(cmd);
 

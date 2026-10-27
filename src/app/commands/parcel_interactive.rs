@@ -320,6 +320,24 @@ impl Default for ParcelSizingCriteria {
     }
 }
 
+impl ParcelSizingCriteria {
+    pub fn from_state(st: &crate::ui::window::parcel_layout_tools::ParcelLayoutToolsState) -> Self {
+        Self {
+            min_area: st.min_area.parse::<f64>().unwrap_or(350.0),
+            min_frontage: st.min_frontage.parse::<f64>().unwrap_or(12.0),
+            use_offset: st.use_offset,
+            frontage_offset: st.frontage_offset.parse::<f64>().unwrap_or(4.0),
+            min_width: st.min_width.parse::<f64>().unwrap_or(10.0),
+            min_depth: st.min_depth.parse::<f64>().unwrap_or(20.0),
+            use_max_depth: st.use_max_depth,
+            max_depth: st.max_depth.parse::<f64>().unwrap_or(80.0),
+            solution_preference: st.solution_preference.clone(),
+            automatic_mode: st.automatic_mode,
+            remainder_mode: st.remainder_mode.clone(),
+        }
+    }
+}
+
 /// Computes the maximum lot depth measured from frontage points to the furthest lot boundary vertex.
 pub fn compute_lot_depth(lot: &[[f64; 2]], frontage_pts: &[[f64; 2]]) -> f64 {
     if lot.is_empty() || frontage_pts.len() < 2 {
@@ -697,6 +715,223 @@ pub fn solve_slide_line_criteria(
     solutions.into_iter().next().ok_or_else(|| "Could not find valid slide line cut for parcel".to_string())
 }
 
+/// Comprehensive solver generating candidate swing line cuts around a pivot point along a frontage path,
+/// respecting all Civil 3D criteria (Min Area, Min Frontage, Frontage Offset, Min Width, Min/Max Depth, Solution Preference).
+pub fn solve_swing_line_candidates(
+    poly: &[[f64; 2]],
+    pivot: [f64; 2],
+    frontage_path: &[[f64; 2]],
+    target_area: f64,
+    criteria: Option<&ParcelSizingCriteria>,
+) -> Result<Vec<SlideSlice>, String> {
+    let total_area = shoelace_area(poly);
+    if total_area < 1e-4 {
+        return Err("Parcel polygon has zero area".to_string());
+    }
+    if target_area <= 0.0 || target_area >= total_area {
+        return Err(format!(
+            "Target area ({:.1} m²) must be between 0 and total area ({:.1} m²)",
+            target_area, total_area
+        ));
+    }
+    let total_f_len = poly_path_length(frontage_path);
+    if total_f_len < 1e-4 {
+        return Err("Frontage path is too short".to_string());
+    }
+
+    let min_f = criteria.map_or(0.0, |c| c.min_frontage);
+    let use_offset = criteria.map_or(false, |c| c.use_offset);
+    let offset_dist = criteria.map_or(0.0, |c| c.frontage_offset);
+    let min_w = criteria.map_or(0.0, |c| c.min_width);
+    let min_depth = criteria.map_or(0.0, |c| c.min_depth);
+    let use_max_d = criteria.map_or(false, |c| c.use_max_depth);
+    let max_depth = criteria.map_or(0.0, |c| c.max_depth);
+    let pref = criteria.map_or("Use shortest frontage", |c| c.solution_preference.as_str());
+
+    let forward_path = frontage_path.to_vec();
+    let mut reverse_path = frontage_path.to_vec();
+    reverse_path.reverse();
+
+    let search_paths = vec![forward_path, reverse_path];
+    let mut solutions: Vec<SlideSlice> = Vec::new();
+
+    for path in &search_paths {
+        let f_start_pt = path[0];
+        let mut s_low = 0.001 * total_f_len;
+        let mut s_high = 0.999 * total_f_len;
+        let mut best_slice: Option<SlideSlice> = None;
+
+        for _ in 0..60 {
+            let s_mid = 0.5 * (s_low + s_high);
+            let (pt, _) = sample_path_at_dist(path, s_mid);
+            let ray_dir = [pt[0] - pivot[0], pt[1] - pivot[1]];
+            let r_len = (ray_dir[0] * ray_dir[0] + ray_dir[1] * ray_dir[1]).sqrt();
+            if r_len < 1e-6 {
+                s_low = (s_low + s_mid) * 0.5;
+                continue;
+            }
+            let u_ray = [ray_dir[0] / r_len, ray_dir[1] / r_len];
+            let (_, f_edge, _) = snap_point_to_polygon(pt, poly);
+
+            if let Some(mut slice) = slice_polygon_by_ray(poly, f_edge, pt, [-u_ray[0], -u_ray[1]], f_start_pt) {
+                let diff = slice.target_area - target_area;
+                slice.frontage_length = s_mid;
+                best_slice = Some(slice);
+                if diff.abs() < 0.01 {
+                    break;
+                }
+                if diff < 0.0 {
+                    s_low = s_mid;
+                } else {
+                    s_high = s_mid;
+                }
+            } else {
+                s_low = (s_low + s_mid) * 0.5;
+            }
+        }
+
+        if let Some(mut slice) = best_slice {
+            let sub_path = trace_polygon_path(poly, f_start_pt, slice.cut_line.0);
+            let depth = compute_lot_depth(&slice.target_lot, &sub_path);
+            let width_at_offset = if use_offset && offset_dist > 0.0 {
+                compute_width_at_offset(&slice.target_lot, &sub_path, offset_dist)
+            } else {
+                slice.frontage_length
+            };
+
+            let mut ok = true;
+            if min_f > 0.0 && slice.frontage_length < min_f - 0.05 {
+                ok = false;
+            }
+            if use_offset && offset_dist > 0.0 {
+                let req_w = min_f.max(min_w);
+                if req_w > 0.0 && width_at_offset < req_w - 0.05 {
+                    ok = false;
+                }
+            }
+            if min_depth > 0.0 && depth < min_depth - 0.05 {
+                ok = false;
+            }
+            if use_max_d && max_depth > 0.0 && depth > max_depth + 0.05 {
+                ok = false;
+            }
+
+            slice.depth = depth;
+            slice.width_at_offset = width_at_offset;
+            slice.satisfies_criteria = ok;
+
+            let is_dup = solutions.iter().any(|s| {
+                (s.cut_line.0[0] - slice.cut_line.0[0]).abs() < 0.1
+                    && (s.cut_line.0[1] - slice.cut_line.0[1]).abs() < 0.1
+                    && (s.cut_line.1[0] - slice.cut_line.1[0]).abs() < 0.1
+                    && (s.cut_line.1[1] - slice.cut_line.1[1]).abs() < 0.1
+            });
+            if !is_dup {
+                solutions.push(slice);
+            }
+        }
+
+        // Also test candidate cut at exact min_frontage if valid
+        if min_f > 0.0 && total_f_len >= min_f * 1.05 {
+            let (pt_f, _) = sample_path_at_dist(path, min_f);
+            let ray_dir_f = [pt_f[0] - pivot[0], pt_f[1] - pivot[1]];
+            let r_len_f = (ray_dir_f[0] * ray_dir_f[0] + ray_dir_f[1] * ray_dir_f[1]).sqrt();
+            if r_len_f > 1e-6 {
+                let u_ray_f = [ray_dir_f[0] / r_len_f, ray_dir_f[1] / r_len_f];
+                let (_, f_edge_f, _) = snap_point_to_polygon(pt_f, poly);
+                if let Some(mut slice_f) = slice_polygon_by_ray(poly, f_edge_f, pt_f, [-u_ray_f[0], -u_ray_f[1]], f_start_pt) {
+                    slice_f.frontage_length = min_f;
+                    let sub_path = trace_polygon_path(poly, f_start_pt, slice_f.cut_line.0);
+                    let depth = compute_lot_depth(&slice_f.target_lot, &sub_path);
+                    let width_at_offset = if use_offset && offset_dist > 0.0 {
+                        compute_width_at_offset(&slice_f.target_lot, &sub_path, offset_dist)
+                    } else {
+                        min_f
+                    };
+                    let mut ok = slice_f.target_area >= target_area - 0.05;
+                    if use_offset && offset_dist > 0.0 {
+                        let req_w = min_f.max(min_w);
+                        if req_w > 0.0 && width_at_offset < req_w - 0.05 {
+                            ok = false;
+                        }
+                    }
+                    if min_depth > 0.0 && depth < min_depth - 0.05 {
+                        ok = false;
+                    }
+                    if use_max_d && max_depth > 0.0 && depth > max_depth + 0.05 {
+                        ok = false;
+                    }
+                    slice_f.depth = depth;
+                    slice_f.width_at_offset = width_at_offset;
+                    slice_f.satisfies_criteria = ok;
+
+                    let is_dup = solutions.iter().any(|s| {
+                        (s.cut_line.0[0] - slice_f.cut_line.0[0]).abs() < 0.1
+                            && (s.cut_line.0[1] - slice_f.cut_line.0[1]).abs() < 0.1
+                            && (s.cut_line.1[0] - slice_f.cut_line.1[0]).abs() < 0.1
+                            && (s.cut_line.1[1] - slice_f.cut_line.1[1]).abs() < 0.1
+                    });
+                    if !is_dup {
+                        solutions.push(slice_f);
+                    }
+                }
+            }
+        }
+    }
+
+    if solutions.is_empty() {
+        return Err("Could not find valid swing line solution".to_string());
+    }
+
+    solutions.sort_by(|a, b| {
+        match (a.satisfies_criteria, b.satisfies_criteria) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => {
+                if pref.contains("smallest area") {
+                    (a.target_area - target_area).abs().partial_cmp(&(b.target_area - target_area).abs()).unwrap_or(std::cmp::Ordering::Equal)
+                } else if pref.contains("largest frontage") {
+                    b.frontage_length.partial_cmp(&a.frontage_length).unwrap_or(std::cmp::Ordering::Equal)
+                } else {
+                    a.frontage_length.partial_cmp(&b.frontage_length).unwrap_or(std::cmp::Ordering::Equal)
+                }
+            }
+        }
+    });
+
+    Ok(solutions)
+}
+
+/// Solves for swing line cut around pivot point that achieves `target_area`
+pub fn solve_swing_line(
+    poly: &[[f64; 2]],
+    pivot: [f64; 2],
+    f_start: [f64; 2],
+    f_end: [f64; 2],
+    target_area: f64,
+) -> Result<SlideSlice, String> {
+    solve_swing_line_criteria(poly, pivot, f_start, f_end, target_area, 0.0)
+}
+
+/// Solves for swing line cut around pivot point respecting `min_frontage`
+pub fn solve_swing_line_criteria(
+    poly: &[[f64; 2]],
+    pivot: [f64; 2],
+    f_start: [f64; 2],
+    f_end: [f64; 2],
+    target_area: f64,
+    min_frontage: f64,
+) -> Result<SlideSlice, String> {
+    let crit = ParcelSizingCriteria {
+        min_area: target_area,
+        min_frontage,
+        ..Default::default()
+    };
+    let path = vec![f_start, f_end];
+    let solutions = solve_swing_line_candidates(poly, pivot, &path, target_area, Some(&crit))?;
+    solutions.into_iter().next().ok_or_else(|| "Could not find valid swing line cut".to_string())
+}
+
 // ── Multi-Lot Subdivision Solver ──────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -881,6 +1116,46 @@ pub fn solve_multi_slide_line_path(
         lot_areas,
         lot_frontages,
     })
+}
+
+/// Solves multi-lot slide line subdivision along frontage path, verifying all Civil 3D criteria for each lot.
+pub fn solve_multi_slide_line_path_criteria(
+    poly: &[[f64; 2]],
+    frontage_path: &[[f64; 2]],
+    angle_deg: f64,
+    criteria: &ParcelSizingCriteria,
+) -> Result<MultiSlideResult, String> {
+    let res = solve_multi_slide_line_path(
+        poly,
+        frontage_path,
+        angle_deg,
+        criteria.min_area,
+        criteria.min_frontage,
+        &criteria.remainder_mode,
+    )?;
+
+    // Validate that generated lots satisfy depth and offset criteria
+    let min_depth = criteria.min_depth;
+    let use_max_d = criteria.use_max_depth;
+    let max_depth = criteria.max_depth;
+    let use_offset = criteria.use_offset;
+    let offset_dist = criteria.frontage_offset;
+    let min_w = criteria.min_width;
+
+    if min_depth > 0.0 || (use_max_d && max_depth > 0.0) || (use_offset && offset_dist > 0.0 && min_w > 0.0) {
+        for (i, lot) in res.lots.iter().enumerate() {
+            let (f_pt, _, _) = snap_point_to_polygon(lot[0], frontage_path);
+            let d = compute_lot_depth(lot, &[f_pt, lot[lot.len().min(1)]]);
+            if min_depth > 0.0 && d < min_depth - 0.5 {
+                return Err(format!("Lot {} depth ({:.1}m) is less than minimum depth ({:.1}m)", i + 1, d, min_depth));
+            }
+            if use_max_d && max_depth > 0.0 && d > max_depth + 0.5 {
+                return Err(format!("Lot {} depth ({:.1}m) exceeds maximum depth ({:.1}m)", i + 1, d, max_depth));
+            }
+        }
+    }
+
+    Ok(res)
 }
 
 /// Solves multi-lot slide line subdivision along frontage
@@ -1139,13 +1414,11 @@ impl SlideLineCommand {
         };
 
         if self.automatic_mode {
-            match solve_multi_slide_line_path(
+            match solve_multi_slide_line_path_criteria(
                 &self.parent_vertices,
                 &path,
                 self.angle_deg,
-                self.min_area,
-                self.min_frontage,
-                &self.remainder_mode,
+                &self.criteria,
             ) {
                 Ok(multi) => {
                     self.multi_solution = Some(multi);
@@ -1504,12 +1777,10 @@ impl CadCommand for SlideLineCommand {
             }
             SlideStep::AcceptPreview => {
                 let up = t.to_ascii_uppercase();
-                if up == "NEXT" || (up == "N" && self.candidate_solutions.len() > 1) {
-                    if self.candidate_solutions.len() > 1 {
-                        self.current_solution_idx = (self.current_solution_idx + 1) % self.candidate_solutions.len();
-                        self.solution = Some(self.candidate_solutions[self.current_solution_idx].clone());
-                        return Some(CmdResult::NeedPoint);
-                    }
+                if up == "NEXT" && self.candidate_solutions.len() > 1 {
+                    self.current_solution_idx = (self.current_solution_idx + 1) % self.candidate_solutions.len();
+                    self.solution = Some(self.candidate_solutions[self.current_solution_idx].clone());
+                    return Some(CmdResult::NeedPoint);
                 }
 
                 if self.automatic_mode {
@@ -1964,13 +2235,17 @@ pub enum SwingEditStep {
 }
 
 pub struct SwingLineEditCommand {
+    pub criteria: ParcelSizingCriteria,
     pub min_area: f64,
     pub min_frontage: f64,
+    pub frontage_offset: f64,
+    pub automatic_mode: bool,
+    pub remainder_mode: String,
     pub step: SwingEditStep,
 
     pub attached_line_pt: Option<[f64; 2]>,
 
-        pub target_handle: Option<Handle>,
+    pub target_handle: Option<Handle>,
 
     pub target_name: String,
 
@@ -1983,8 +2258,6 @@ pub struct SwingLineEditCommand {
     pub target_vertices: Vec<[f64; 2]>,
 
     pub target_area: f64,
-
-
 
     pub neighbor_handle: Option<Handle>,
 
@@ -2014,30 +2287,41 @@ pub struct SwingLineEditCommand {
 
 impl SwingLineEditCommand {
     pub fn new(min_area: f64, min_frontage: f64) -> Self {
-        Self {
+        let criteria = ParcelSizingCriteria {
             min_area: if min_area > 0.0 { min_area } else { 350.0 },
             min_frontage: if min_frontage > 0.0 { min_frontage } else { 12.0 },
+            ..Default::default()
+        };
+        Self::new_with_criteria(criteria)
+    }
+
+    pub fn new_with_criteria(criteria: ParcelSizingCriteria) -> Self {
+        let min_area = criteria.min_area;
+        let min_frontage = criteria.min_frontage;
+        let frontage_offset = criteria.frontage_offset;
+        let automatic_mode = criteria.automatic_mode;
+        let remainder_mode = criteria.remainder_mode.clone();
+
+        Self {
+            criteria,
+            min_area,
+            min_frontage,
+            frontage_offset,
+            automatic_mode,
+            remainder_mode,
             step: SwingEditStep::PickAttachedLotLine,
             attached_line_pt: None,
             target_handle: None,
             target_name: "LOT_TARGET".to_string(),
             target_site: "Site 1".to_string(),
             target_layer: "PC-PARCEL".to_string(),
-
             target_zoning: "Single-Family Residential (R-1)".to_string(),
-
             target_vertices: Vec::new(),
-
             target_area: 0.0,
-
             neighbor_handle: None,
-
             neighbor_name: "LOT_NEIGHBOR".to_string(),
-
             neighbor_site: "Site 1".to_string(),
-
             neighbor_layer: "PC-PARCEL".to_string(),
-
             neighbor_zoning: "Single-Family Residential (R-1)".to_string(),
             neighbor_vertices: Vec::new(),
             neighbor_area: 0.0,
@@ -2053,6 +2337,14 @@ impl SwingLineEditCommand {
         }
     }
 
+    pub fn sync_criteria(&mut self) {
+        self.criteria.min_area = self.min_area;
+        self.criteria.min_frontage = self.min_frontage;
+        self.criteria.frontage_offset = self.frontage_offset;
+        self.criteria.automatic_mode = self.automatic_mode;
+        self.criteria.remainder_mode = self.remainder_mode.clone();
+    }
+
     fn update_combined_polygon(&mut self) {
         if !self.target_vertices.is_empty() && !self.neighbor_vertices.is_empty() {
             if let Some(union_pts) = union_two_parcels(&self.target_vertices, &self.neighbor_vertices, 0.5) {
@@ -2064,6 +2356,7 @@ impl SwingLineEditCommand {
     }
 
     pub fn solve_swing_edit(&mut self) -> Result<(), String> {
+        self.sync_criteria();
         let (Some(pivot), Some(f_start), Some(f_end)) = (self.pivot_point, self.frontage_start, self.frontage_end) else {
             return Err("Pivot and frontage points must be defined".to_string());
         };
@@ -2084,54 +2377,19 @@ impl SwingLineEditCommand {
             trace_polygon_path(base_poly, f_start, f_end)
         };
 
-        let total_area = shoelace_area(base_poly);
-        if self.min_area <= 0.0 || self.min_area >= total_area {
-            return Err(format!("Target area ({:.1}m²) must be between 0 and total combined area ({:.1}m²)", self.min_area, total_area));
-        }
+        let sols = solve_swing_line_candidates(
+            base_poly,
+            pivot,
+            &path,
+            self.min_area,
+            Some(&self.criteria),
+        )?;
 
-        let total_f = poly_path_length(&path);
-        let mut s_low = 0.001 * total_f;
-        let mut s_high = 0.999 * total_f;
-        let mut best_slice: Option<SlideSlice> = None;
-
-        for _ in 0..60 {
-            let s_mid = 0.5 * (s_low + s_high);
-            let (pt, _) = sample_path_at_dist(&path, s_mid);
-            let ray_dir = [pt[0] - pivot[0], pt[1] - pivot[1]];
-            let r_len = (ray_dir[0] * ray_dir[0] + ray_dir[1] * ray_dir[1]).sqrt();
-            if r_len < 1e-6 {
-                s_low = (s_low + s_mid) * 0.5;
-                continue;
-            }
-            let u_ray = [ray_dir[0] / r_len, ray_dir[1] / r_len];
-            let (_, f_edge, _) = snap_point_to_polygon(pt, base_poly);
-
-            if let Some(mut slice) = slice_polygon_by_ray(base_poly, f_edge, pt, [-u_ray[0], -u_ray[1]], f_start) {
-                let diff = slice.target_area - self.min_area;
-                slice.frontage_length = s_mid;
-                best_slice = Some(slice);
-                if diff.abs() < 0.01 {
-                    break;
-                }
-                if diff < 0.0 {
-                    s_low = s_mid;
-                } else {
-                    s_high = s_mid;
-                }
-            } else {
-                s_low = (s_low + s_mid) * 0.5;
-            }
-        }
-
-        if let Some(slice) = best_slice {
-            self.solution = Some(slice.clone());
-            self.candidate_solutions = vec![slice];
-            self.current_solution_idx = 0;
-            self.step = SwingEditStep::AcceptPreview;
-            Ok(())
-        } else {
-            Err("Could not find valid swing line edit solution".to_string())
-        }
+        self.solution = Some(sols[0].clone());
+        self.candidate_solutions = sols;
+        self.current_solution_idx = 0;
+        self.step = SwingEditStep::AcceptPreview;
+        Ok(())
     }
 }
 
@@ -2159,9 +2417,22 @@ impl CadCommand for SwingLineEditCommand {
             }
             SwingEditStep::AcceptPreview => {
                 if let Some(sol) = &self.solution {
+                    let total_sols = self.candidate_solutions.len();
+                    let sol_info = if total_sols > 1 {
+                        format!(" [Solution {}/{}]", self.current_solution_idx + 1, total_sols)
+                    } else {
+                        String::new()
+                    };
+                    let warn = if !sol.satisfies_criteria {
+                        " (Criteria Warning: bounds violated)"
+                    } else {
+                        ""
+                    };
                     format!(
-                        "SWINGLINEEDIT  Target: {:.1}m², Neighbor: {:.1}m² (Frontage: {:.1}m). Accept result? [Yes/No/Next] <Yes>:",
-                        sol.target_area, sol.remainder_area, sol.frontage_length
+                        "SWINGLINEEDIT{}  Target: {:.1}m², Frontage: {:.1}m, Depth: {:.1}m, Neighbor: {:.1}m{}{}. Accept? [Yes/Next/No] <Yes>:",
+                        sol_info, sol.target_area, sol.frontage_length, sol.depth, sol.remainder_area,
+                        if self.criteria.use_offset { format!(", Width@Offset: {:.1}m", sol.width_at_offset) } else { String::new() },
+                        warn
                     )
                 } else {
                     "SWINGLINEEDIT  Accept result? [Yes/No] <Yes>:".to_string()
@@ -2172,11 +2443,14 @@ impl CadCommand for SwingLineEditCommand {
 
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
-            SwingEditStep::AcceptPreview => vec![
-                CmdOption::new("Yes (Accept)", "Y"),
-                CmdOption::new("Next Solution", "NEXT"),
-                CmdOption::new("No (Reject)", "N"),
-            ],
+            SwingEditStep::AcceptPreview => {
+                let mut opts = vec![CmdOption::new("Yes (Accept)", "Y")];
+                if self.candidate_solutions.len() > 1 {
+                    opts.push(CmdOption::new("Next Solution", "NEXT"));
+                }
+                opts.push(CmdOption::new("No (Reject)", "N"));
+                opts
+            }
             _ => Vec::new(),
         }
     }
@@ -2400,7 +2674,7 @@ impl CadCommand for SwingLineEditCommand {
             let up = t.to_ascii_uppercase();
             if up == "Y" || up == "YES" || up.is_empty() {
                 Some(self.commit_solution())
-            } else if up == "NEXT" || (up == "N" && self.candidate_solutions.len() > 1) {
+            } else if up == "NEXT" && self.candidate_solutions.len() > 1 {
                 self.current_solution_idx = (self.current_solution_idx + 1) % self.candidate_solutions.len();
                 self.solution = Some(self.candidate_solutions[self.current_solution_idx].clone());
                 Some(CmdResult::NeedPoint)
@@ -2622,8 +2896,12 @@ pub enum SwingStep {
 }
 
 pub struct SwingLineCommand {
+    pub criteria: ParcelSizingCriteria,
     pub min_area: f64,
     pub min_frontage: f64,
+    pub frontage_offset: f64,
+    pub automatic_mode: bool,
+    pub remainder_mode: String,
     pub step: SwingStep,
 
     pub parent_handle: Option<Handle>,
@@ -2660,9 +2938,28 @@ pub struct SwingLineCommand {
 
 impl SwingLineCommand {
     pub fn new(min_area: f64, min_frontage: f64) -> Self {
-        Self {
+        let criteria = ParcelSizingCriteria {
             min_area: if min_area > 0.0 { min_area } else { 350.0 },
             min_frontage: if min_frontage > 0.0 { min_frontage } else { 12.0 },
+            ..Default::default()
+        };
+        Self::new_with_criteria(criteria)
+    }
+
+    pub fn new_with_criteria(criteria: ParcelSizingCriteria) -> Self {
+        let min_area = criteria.min_area;
+        let min_frontage = criteria.min_frontage;
+        let frontage_offset = criteria.frontage_offset;
+        let automatic_mode = criteria.automatic_mode;
+        let remainder_mode = criteria.remainder_mode.clone();
+
+        Self {
+            criteria,
+            min_area,
+            min_frontage,
+            frontage_offset,
+            automatic_mode,
+            remainder_mode,
             step: SwingStep::PickParcel,
             parent_handle: None,
             parent_name: "LOT".to_string(),
@@ -2690,7 +2987,16 @@ impl SwingLineCommand {
         }
     }
 
+    pub fn sync_criteria(&mut self) {
+        self.criteria.min_area = self.min_area;
+        self.criteria.min_frontage = self.min_frontage;
+        self.criteria.frontage_offset = self.frontage_offset;
+        self.criteria.automatic_mode = self.automatic_mode;
+        self.criteria.remainder_mode = self.remainder_mode.clone();
+    }
+
     fn solve_swing(&mut self) -> Result<(), String> {
+        self.sync_criteria();
         let (Some(pivot), Some(f_start), Some(f_end)) = (self.pivot_point, self.frontage_start, self.frontage_end) else {
             return Err("Pivot and frontage points must be defined".to_string());
         };
@@ -2701,54 +3007,19 @@ impl SwingLineCommand {
             trace_polygon_path(&self.parent_vertices, f_start, f_end)
         };
 
-        let total_area = shoelace_area(&self.parent_vertices);
-        if self.min_area <= 0.0 || self.min_area >= total_area {
-            return Err(format!("Target area ({:.1}m²) must be between 0 and total area ({:.1}m²)", self.min_area, total_area));
-        }
+        let sols = solve_swing_line_candidates(
+            &self.parent_vertices,
+            pivot,
+            &path,
+            self.min_area,
+            Some(&self.criteria),
+        )?;
 
-        let total_f = poly_path_length(&path);
-        let mut s_low = 0.001 * total_f;
-        let mut s_high = 0.999 * total_f;
-        let mut best_slice: Option<SlideSlice> = None;
-
-        for _ in 0..60 {
-            let s_mid = 0.5 * (s_low + s_high);
-            let (pt, _) = sample_path_at_dist(&path, s_mid);
-            let ray_dir = [pt[0] - pivot[0], pt[1] - pivot[1]];
-            let r_len = (ray_dir[0] * ray_dir[0] + ray_dir[1] * ray_dir[1]).sqrt();
-            if r_len < 1e-6 {
-                s_low = (s_low + s_mid) * 0.5;
-                continue;
-            }
-            let u_ray = [ray_dir[0] / r_len, ray_dir[1] / r_len];
-            let (_, f_edge, _) = snap_point_to_polygon(pt, &self.parent_vertices);
-
-            if let Some(mut slice) = slice_polygon_by_ray(&self.parent_vertices, f_edge, pt, [-u_ray[0], -u_ray[1]], f_start) {
-                let diff = slice.target_area - self.min_area;
-                slice.frontage_length = s_mid;
-                best_slice = Some(slice);
-                if diff.abs() < 0.01 {
-                    break;
-                }
-                if diff < 0.0 {
-                    s_low = s_mid;
-                } else {
-                    s_high = s_mid;
-                }
-            } else {
-                s_low = (s_low + s_mid) * 0.5;
-            }
-        }
-
-        if let Some(slice) = best_slice {
-            self.solution = Some(slice.clone());
-            self.candidate_solutions = vec![slice];
-            self.current_solution_idx = 0;
-            self.step = SwingStep::AcceptPreview;
-            Ok(())
-        } else {
-            Err("Could not find valid swing line solution".to_string())
-        }
+        self.solution = Some(sols[0].clone());
+        self.candidate_solutions = sols;
+        self.current_solution_idx = 0;
+        self.step = SwingStep::AcceptPreview;
+        Ok(())
     }
 }
 
@@ -2773,9 +3044,22 @@ impl CadCommand for SwingLineCommand {
             }
             SwingStep::AcceptPreview => {
                 if let Some(sol) = &self.solution {
+                    let total_sols = self.candidate_solutions.len();
+                    let sol_info = if total_sols > 1 {
+                        format!(" [Solution {}/{}]", self.current_solution_idx + 1, total_sols)
+                    } else {
+                        String::new()
+                    };
+                    let warn = if !sol.satisfies_criteria {
+                        " (Criteria Warning: bounds violated)"
+                    } else {
+                        ""
+                    };
                     format!(
-                        "SWINGLINE  Target: {:.1}m², Remainder: {:.1}m² (Frontage: {:.1}m). Accept result? [Yes/No/Next] <Yes>:",
-                        sol.target_area, sol.remainder_area, sol.frontage_length
+                        "SWINGLINE{}  Target: {:.1}m², Frontage: {:.1}m, Depth: {:.1}m, Remainder: {:.1}m{}{}. Accept? [Yes/Next/No] <Yes>:",
+                        sol_info, sol.target_area, sol.frontage_length, sol.depth, sol.remainder_area,
+                        if self.criteria.use_offset { format!(", Width@Offset: {:.1}m", sol.width_at_offset) } else { String::new() },
+                        warn
                     )
                 } else {
                     "SWINGLINE  Accept result? [Yes/No] <Yes>:".to_string()
@@ -2786,11 +3070,14 @@ impl CadCommand for SwingLineCommand {
 
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
-            SwingStep::AcceptPreview => vec![
-                CmdOption::new("Yes (Accept)", "Y"),
-                CmdOption::new("Next Solution", "NEXT"),
-                CmdOption::new("No (Reject)", "N"),
-            ],
+            SwingStep::AcceptPreview => {
+                let mut opts = vec![CmdOption::new("Yes (Accept)", "Y")];
+                if self.candidate_solutions.len() > 1 {
+                    opts.push(CmdOption::new("Next Solution", "NEXT"));
+                }
+                opts.push(CmdOption::new("No (Reject)", "N"));
+                opts
+            }
             _ => Vec::new(),
         }
     }
@@ -2908,7 +3195,7 @@ impl CadCommand for SwingLineCommand {
             let up = t.to_ascii_uppercase();
             if up == "Y" || up == "YES" || up.is_empty() {
                 Some(self.commit_solution())
-            } else if up == "NEXT" || up == "N" && self.candidate_solutions.len() > 1 {
+            } else if up == "NEXT" && self.candidate_solutions.len() > 1 {
                 self.current_solution_idx = (self.current_solution_idx + 1) % self.candidate_solutions.len();
                 self.solution = Some(self.candidate_solutions[self.current_solution_idx].clone());
                 Some(CmdResult::NeedPoint)
@@ -5406,6 +5693,106 @@ mod tests {
         assert_eq!(multi.cut_lines.len(), 11, "Expected 11 cut lines");
         for a in &multi.lot_areas {
             assert!((a - 500.0).abs() < 1.0, "Lot area should be ~500 m2, got {}", a);
+        }
+    }
+
+    #[test]
+    fn test_solve_swing_line_candidates_and_criteria() {
+        let rect = vec![
+            [0.0, 0.0],
+            [40.0, 0.0],
+            [40.0, 25.0],
+            [0.0, 25.0],
+        ];
+        let pivot = [20.0, 25.0]; // midpoint of rear boundary
+        let path = vec![[0.0, 0.0], [40.0, 0.0]]; // 40m frontage
+        let target_area = 350.0;
+
+        let criteria = ParcelSizingCriteria {
+            min_area: 350.0,
+            min_frontage: 12.0,
+            use_offset: true,
+            frontage_offset: 4.0,
+            min_width: 10.0,
+            min_depth: 20.0,
+            use_max_depth: true,
+            max_depth: 80.0,
+            solution_preference: "Use shortest frontage".to_string(),
+            ..Default::default()
+        };
+
+        let sols = solve_swing_line_candidates(&rect, pivot, &path, target_area, Some(&criteria));
+        assert!(sols.is_ok(), "Swing line candidates failed: {:?}", sols.err());
+        let solutions = sols.unwrap();
+        assert!(!solutions.is_empty(), "Should produce at least one candidate solution");
+        for sol in &solutions {
+            assert!(sol.frontage_length > 0.0, "Frontage length should be positive and valid");
+            assert!(sol.depth >= 15.0, "Depth should be measured properly");
+            assert!(sol.target_area > 0.0);
+        }
+    }
+
+    #[test]
+    fn test_interactive_swing_line_command_workflow() {
+        let mut doc = codec::CadDocument::default();
+        let rect = vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(40.0, 0.0),
+            Vector2::new(40.0, 25.0),
+            Vector2::new(0.0, 25.0),
+        ];
+        let mut pl = LwPolyline::from_points(rect);
+        pl.is_closed = true;
+        let mut ent = EntityType::LwPolyline(pl);
+        ent.common_mut().layer = "PC-PARCEL".to_string();
+        let handle = doc.add_entity(ent).unwrap();
+
+        let criteria = ParcelSizingCriteria {
+            min_area: 350.0,
+            min_frontage: 12.0,
+            ..Default::default()
+        };
+        let mut cmd = SwingLineCommand::new_with_criteria(criteria);
+        assert_eq!(cmd.step, SwingStep::PickParcel);
+
+        // 1. Pick parcel
+        cmd.inject_picked_entity(doc.get_entity(handle).unwrap().clone());
+        let res = cmd.on_entity_pick(handle, DVec3::new(20.0, 10.0, 0.0));
+        assert!(matches!(res, CmdResult::NeedPoint));
+        assert_eq!(cmd.step, SwingStep::PickPivot);
+
+        // 2. Pick pivot on rear
+        let res = cmd.on_point(DVec3::new(20.0, 25.0, 0.0));
+        assert!(matches!(res, CmdResult::NeedPoint));
+        assert_eq!(cmd.step, SwingStep::PickFrontageStart);
+
+        // 3. Pick frontage start
+        let res = cmd.on_point(DVec3::new(0.0, 0.0, 0.0));
+        assert!(matches!(res, CmdResult::NeedPoint));
+        assert_eq!(cmd.step, SwingStep::PickFrontageEnd);
+
+        // 4. Pick frontage end
+        let res = cmd.on_point(DVec3::new(40.0, 0.0, 0.0));
+        assert!(matches!(res, CmdResult::NeedPoint));
+        assert_eq!(cmd.step, SwingStep::AcceptPreview);
+        assert!(cmd.solution.is_some());
+        assert!(!cmd.candidate_solutions.is_empty());
+
+        // 5. Test next solution cycling
+        if cmd.candidate_solutions.len() > 1 {
+            let _ = cmd.on_text_input("NEXT");
+            assert!(cmd.solution.is_some());
+        }
+
+        // 6. Accept
+        let res = cmd.on_enter();
+        match res {
+            CmdResult::ReplaceMany(reps, _) => {
+                assert_eq!(reps.len(), 1);
+                assert_eq!(reps[0].0, handle);
+                assert_eq!(reps[0].1.len(), 2, "Must produce 2 child parcels");
+            }
+            _ => panic!("Expected CmdResult::ReplaceMany for SwingLineCommand"),
         }
     }
 }
