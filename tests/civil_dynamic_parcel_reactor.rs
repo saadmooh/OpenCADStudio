@@ -912,3 +912,81 @@ fn test_parcel_line_table_interactive_command_and_drawing() {
     }).count();
     assert!(table_lines_count >= 5, "Table grid must have boundary and divider lines, found {}", table_lines_count);
 }
+
+#[test]
+fn test_site_topology_overlap_resolution() {
+    let mut doc = CadDocument::new();
+
+    // 1. Create LOT-101 (dimensions 30x20m: [0, 0] to [30, 20], Area = 600 m²) in Site 1
+    let mut poly1 = LwPolyline::from_points(vec![
+        Vector2::new(0.0, 0.0),
+        Vector2::new(30.0, 0.0),
+        Vector2::new(30.0, 20.0),
+        Vector2::new(0.0, 20.0),
+    ]);
+    poly1.is_closed = true;
+    let mut ent1 = EntityType::LwPolyline(poly1);
+    ent1.common_mut().layer = "C-PROP".to_string();
+    let mut rec1 = codec::xdata::ExtendedDataRecord::new(XDATA_PARCEL);
+    rec1.add_value(codec::xdata::XDataValue::String("LOT-101".to_string()));
+    rec1.add_value(codec::xdata::XDataValue::String("Site 1".to_string()));
+    rec1.add_value(codec::xdata::XDataValue::String("101".to_string()));
+    ent1.common_mut().extended_data.add_record(rec1);
+    let h1 = doc.add_entity(ent1).unwrap();
+
+    // 2. Create LOT-102 (dimensions 30x20m: [20, 0] to [50, 20], Area = 600 m²) in Site 1
+    // Overlapping LOT-101 by 10x20m (200 m² overlap)!
+    let mut poly2 = LwPolyline::from_points(vec![
+        Vector2::new(20.0, 0.0),
+        Vector2::new(50.0, 0.0),
+        Vector2::new(50.0, 20.0),
+        Vector2::new(20.0, 20.0),
+    ]);
+    poly2.is_closed = true;
+    let mut ent2 = EntityType::LwPolyline(poly2);
+    ent2.common_mut().layer = "C-PROP".to_string();
+    let mut rec2 = codec::xdata::ExtendedDataRecord::new(XDATA_PARCEL);
+    rec2.add_value(codec::xdata::XDataValue::String("LOT-102".to_string()));
+    rec2.add_value(codec::xdata::XDataValue::String("Site 1".to_string()));
+    rec2.add_value(codec::xdata::XDataValue::String("102".to_string()));
+    ent2.common_mut().extended_data.add_record(rec2);
+    let h2 = doc.add_entity(ent2).unwrap();
+
+    // 3. Resolve overlaps with LOT-102 as cutter
+    let resolved = ParcelData::resolve_site_topology_overlaps(&mut doc, Some(h2));
+    assert_eq!(resolved, 1, "Must resolve 1 overlapping parcel");
+
+    // 4. Verify LOT-101 was clipped:
+    // Original LOT-101 was [0..30, 0..20] (600 m²).
+    // LOT-102 took [20..50, 0..20].
+    // LOT-101 remaining should be [0..20, 0..20] (400 m²)!
+    let p1_after = ParcelData::from_document_entity(&doc, h1).expect("LOT-101 must exist");
+    assert!((p1_after.area_2d - 400.0).abs() < 1.0, "LOT-101 area should be 400 m², got {}", p1_after.area_2d);
+
+    let p2_after = ParcelData::from_document_entity(&doc, h2).expect("LOT-102 must exist");
+    assert!((p2_after.area_2d - 600.0).abs() < 1.0, "LOT-102 area should be 600 m², got {}", p2_after.area_2d);
+
+    // 5. Verify different sites are NOT clipped:
+    // Create LOT-201 in Site 2 overlapping LOT-102
+    let mut poly3 = LwPolyline::from_points(vec![
+        Vector2::new(30.0, 0.0),
+        Vector2::new(60.0, 0.0),
+        Vector2::new(60.0, 20.0),
+        Vector2::new(30.0, 20.0),
+    ]);
+    poly3.is_closed = true;
+    let mut ent3 = EntityType::LwPolyline(poly3);
+    ent3.common_mut().layer = "C-PROP".to_string();
+    let mut rec3 = codec::xdata::ExtendedDataRecord::new(XDATA_PARCEL);
+    rec3.add_value(codec::xdata::XDataValue::String("LOT-201".to_string()));
+    rec3.add_value(codec::xdata::XDataValue::String("Site 2".to_string())); // Different Site!
+    rec3.add_value(codec::xdata::XDataValue::String("201".to_string()));
+    ent3.common_mut().extended_data.add_record(rec3);
+    let h3 = doc.add_entity(ent3).unwrap();
+
+    let resolved_diff_site = ParcelData::resolve_site_topology_overlaps(&mut doc, Some(h3));
+    assert_eq!(resolved_diff_site, 0, "Different sites must NOT be clipped against each other");
+
+    let p2_still = ParcelData::from_document_entity(&doc, h2).unwrap();
+    assert!((p2_still.area_2d - 600.0).abs() < 1.0, "LOT-102 in Site 1 must retain full area when Site 2 overlaps");
+}

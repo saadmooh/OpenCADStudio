@@ -105,6 +105,379 @@ pub fn is_parcel_entity(ent: &EntityType) -> bool {
     }
 }
 
+
+/// Computes 2D signed area of a polygon loop using the Shoelace formula.
+pub fn calc_polygon_area(pts: &[[f64; 2]]) -> f64 {
+    let n = pts.len();
+    if n < 3 {
+        return 0.0;
+    }
+    let mut area = 0.0;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        area += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1];
+    }
+    0.5 * area
+}
+
+/// Point-in-polygon ray casting test (strictly interior or on boundary).
+pub fn is_point_inside_polygon(pt: [f64; 2], poly: &[[f64; 2]]) -> bool {
+    let n = poly.len();
+    if n < 3 {
+        return false;
+    }
+    let mut inside = false;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let xi = poly[i][0];
+        let yi = poly[i][1];
+        let xj = poly[j][0];
+        let yj = poly[j][1];
+
+        let denom = yj - yi;
+        let intersect = ((yi > pt[1]) != (yj > pt[1]))
+            && (pt[0] < (xj - xi) * (pt[1] - yi) / (if denom.abs() < 1e-12 { 1e-12 * denom.signum() } else { denom }) + xi);
+        if intersect {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// 2D Segment-segment intersection test returning (t, u, [x, y]).
+pub fn segment_intersection(
+    p1: [f64; 2],
+    p2: [f64; 2],
+    q1: [f64; 2],
+    q2: [f64; 2],
+) -> Option<(f64, f64, [f64; 2])> {
+    let d = (p2[0] - p1[0]) * (q2[1] - q1[1]) - (p2[1] - p1[1]) * (q2[0] - q1[0]);
+    if d.abs() < 1e-11 {
+        return None;
+    }
+    let t = ((q1[0] - p1[0]) * (q2[1] - q1[1]) - (q1[1] - p1[1]) * (q2[0] - q1[0])) / d;
+    let u = ((q1[0] - p1[0]) * (p2[1] - p1[1]) - (q1[1] - p1[1]) * (p2[0] - p1[0])) / d;
+    if t > 1e-6 && t < (1.0 - 1e-6) && u > 1e-6 && u < (1.0 - 1e-6) {
+        let x = p1[0] + t * (p2[0] - p1[0]);
+        let y = p1[1] + t * (p2[1] - p1[1]);
+        Some((t, u, [x, y]))
+    } else {
+        None
+    }
+}
+
+/// Projects point `p` onto line segment `a`->`b`.
+pub fn project_point_to_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ab2 = ab[0] * ab[0] + ab[1] * ab[1];
+    if ab2 < 1e-12 {
+        return a;
+    }
+    let ap = [p[0] - a[0], p[1] - a[1]];
+    let t = ((ap[0] * ab[0] + ap[1] * ab[1]) / ab2).clamp(0.0, 1.0);
+    [a[0] + t * ab[0], a[1] + t * ab[1]]
+}
+
+/// Outward normal offset of polygon loop to ensure clean transverse intersections.
+pub fn inflate_polygon(poly: &[[f64; 2]], delta: f64) -> Vec<[f64; 2]> {
+    let n = poly.len();
+    if n < 3 {
+        return poly.to_vec();
+    }
+    let mut normals = Vec::with_capacity(n);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let dx = poly[j][0] - poly[i][0];
+        let dy = poly[j][1] - poly[i][1];
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-9 {
+            normals.push([0.0, 0.0]);
+        } else {
+            normals.push([dy / len, -dx / len]);
+        }
+    }
+
+    let mut inflated = Vec::with_capacity(n);
+    for i in 0..n {
+        let prev = if i == 0 { n - 1 } else { i - 1 };
+        let n1 = normals[prev];
+        let n2 = normals[i];
+        let mut dir = [n1[0] + n2[0], n1[1] + n2[1]];
+        let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
+        if len < 1e-5 {
+            dir = n2;
+        } else {
+            dir[0] /= len;
+            dir[1] /= len;
+        }
+        let dot = (dir[0] * n2[0] + dir[1] * n2[1]).max(0.1);
+        let miter = (delta / dot).min(delta * 4.0);
+        inflated.push([poly[i][0] + dir[0] * miter, poly[i][1] + dir[1] * miter]);
+    }
+    inflated
+}
+
+/// Computes the 2D polygon difference `subject \ cutter`.
+/// Returns the list of remaining closed polygon loops (each CCW oriented).
+pub fn polygon_difference(
+    subject_raw: &[[f64; 2]],
+    cutter_raw: &[[f64; 2]],
+) -> Vec<Vec<[f64; 2]>> {
+    if subject_raw.len() < 3 || cutter_raw.len() < 3 {
+        return vec![subject_raw.to_vec()];
+    }
+
+    let mut subject = subject_raw.to_vec();
+    if calc_polygon_area(&subject) < 0.0 {
+        subject.reverse();
+    }
+    let mut cutter = cutter_raw.to_vec();
+    if calc_polygon_area(&cutter) < 0.0 {
+        cutter.reverse();
+    }
+
+    let delta = 0.001; // 1 mm outward perturbation to resolve collinear edges and vertex-on-edge contacts
+    let cutter_inflated = inflate_polygon(&cutter, delta);
+
+    let all_inside = subject.iter().all(|&p| is_point_inside_polygon(p, &cutter_inflated));
+    if all_inside {
+        return Vec::new();
+    }
+
+    let n_s = subject.len();
+    let n_c = cutter_inflated.len();
+
+    let mut intersections = Vec::new();
+    for i in 0..n_s {
+        let p1 = subject[i];
+        let p2 = subject[(i + 1) % n_s];
+        for j in 0..n_c {
+            let q1 = cutter_inflated[j];
+            let q2 = cutter_inflated[(j + 1) % n_c];
+            if let Some((t, u, pt)) = segment_intersection(p1, p2, q1, q2) {
+                intersections.push((i, t, j, u, pt));
+            }
+        }
+    }
+
+    if intersections.is_empty() {
+        return vec![subject];
+    }
+
+    use std::collections::BTreeMap;
+    let mut s_by_edge: BTreeMap<usize, Vec<(f64, usize, [f64; 2])>> = BTreeMap::new();
+    let mut c_by_edge: BTreeMap<usize, Vec<(f64, usize, [f64; 2])>> = BTreeMap::new();
+
+    for (int_id, &(i, t, j, u, pt)) in intersections.iter().enumerate() {
+        s_by_edge.entry(i).or_default().push((t, int_id, pt));
+        c_by_edge.entry(j).or_default().push((u, int_id, pt));
+    }
+
+    for list in s_by_edge.values_mut() {
+        list.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    }
+    for list in c_by_edge.values_mut() {
+        list.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    }
+
+    #[derive(Clone, Debug)]
+    struct Node {
+        pt: [f64; 2],
+        is_int: bool,
+        int_id: usize,
+        is_entry: bool,
+    }
+
+    let mut new_s: Vec<Node> = Vec::new();
+    for i in 0..n_s {
+        new_s.push(Node {
+            pt: subject[i],
+            is_int: false,
+            int_id: 0,
+            is_entry: false,
+        });
+        if let Some(list) = s_by_edge.get(&i) {
+            for &(_, int_id, pt) in list {
+                new_s.push(Node {
+                    pt,
+                    is_int: true,
+                    int_id,
+                    is_entry: false,
+                });
+            }
+        }
+    }
+
+    let mut new_c: Vec<Node> = Vec::new();
+    for j in 0..n_c {
+        new_c.push(Node {
+            pt: cutter_inflated[j],
+            is_int: false,
+            int_id: 0,
+            is_entry: false,
+        });
+        if let Some(list) = c_by_edge.get(&j) {
+            for &(_, int_id, pt) in list {
+                new_c.push(Node {
+                    pt,
+                    is_int: true,
+                    int_id,
+                    is_entry: false,
+                });
+            }
+        }
+    }
+
+    let len_s = new_s.len();
+    for i in 0..len_s {
+        if new_s[i].is_int {
+            let next_idx = (i + 1) % len_s;
+            let mid = [
+                (new_s[i].pt[0] + new_s[next_idx].pt[0]) * 0.5,
+                (new_s[i].pt[1] + new_s[next_idx].pt[1]) * 0.5,
+            ];
+            new_s[i].is_entry = is_point_inside_polygon(mid, &cutter_inflated);
+        }
+    }
+
+    let mut c_lookup = rustc_hash::FxHashMap::default();
+    for (j, node) in new_c.iter().enumerate() {
+        if node.is_int {
+            c_lookup.insert(node.int_id, j);
+        }
+    }
+
+    let mut s_lookup = rustc_hash::FxHashMap::default();
+    for (i, node) in new_s.iter().enumerate() {
+        if node.is_int {
+            s_lookup.insert(node.int_id, i);
+        }
+    }
+
+    let len_c = new_c.len();
+    let mut visited_s = vec![false; len_s];
+    let mut visited_c = vec![false; len_c];
+    let mut result_polygons = Vec::new();
+
+    let mut start_candidates: Vec<usize> = new_s
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| !node.is_int && !is_point_inside_polygon(node.pt, &cutter_inflated))
+        .map(|(i, _)| i)
+        .collect();
+
+    if start_candidates.is_empty() {
+        start_candidates = new_s
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.is_int && !node.is_entry)
+            .map(|(i, _)| i)
+            .collect();
+    }
+
+    for start_i in start_candidates {
+        if visited_s[start_i] {
+            continue;
+        }
+
+        let mut poly: Vec<[f64; 2]> = Vec::new();
+        let mut curr_i = start_i;
+        let mut curr_on_s = true;
+        let mut step = 0;
+
+        while step < 2000 {
+            step += 1;
+            if curr_on_s {
+                visited_s[curr_i] = true;
+                poly.push(new_s[curr_i].pt);
+                if new_s[curr_i].is_int && new_s[curr_i].is_entry {
+                    if let Some(&c_idx) = c_lookup.get(&new_s[curr_i].int_id) {
+                        curr_on_s = false;
+                        curr_i = if c_idx == 0 { len_c - 1 } else { c_idx - 1 };
+                    } else {
+                        curr_i = (curr_i + 1) % len_s;
+                    }
+                } else {
+                    curr_i = (curr_i + 1) % len_s;
+                }
+            } else {
+                visited_c[curr_i] = true;
+                poly.push(new_c[curr_i].pt);
+                if new_c[curr_i].is_int {
+                    if let Some(&s_idx) = s_lookup.get(&new_c[curr_i].int_id) {
+                        curr_on_s = true;
+                        curr_i = (s_idx + 1) % len_s;
+                    } else {
+                        curr_i = if curr_i == 0 { len_c - 1 } else { curr_i - 1 };
+                    }
+                } else {
+                    curr_i = if curr_i == 0 { len_c - 1 } else { curr_i - 1 };
+                }
+            }
+
+            if curr_on_s && curr_i == start_i {
+                break;
+            }
+        }
+
+        // Snap vertices that lie on/near the cutter back to the exact original cutter boundary
+        let mut snapped: Vec<[f64; 2]> = Vec::with_capacity(poly.len());
+        for p in poly {
+            let mut best_pt = p;
+            let mut min_d = f64::INFINITY;
+            for j in 0..cutter.len() {
+                let q1 = cutter[j];
+                let q2 = cutter[(j + 1) % cutter.len()];
+                let proj = project_point_to_segment(p, q1, q2);
+                let d = ((p[0] - proj[0]).powi(2) + (p[1] - proj[1]).powi(2)).sqrt();
+                if d < min_d {
+                    min_d = d;
+                    best_pt = proj;
+                }
+            }
+            if min_d <= 0.005 {
+                snapped.push(best_pt);
+            } else {
+                snapped.push(p);
+            }
+        }
+
+        let mut clean: Vec<[f64; 2]> = Vec::new();
+        for p in snapped {
+            if clean.is_empty() {
+                clean.push(p);
+            } else {
+                let last = clean.last().unwrap();
+                let dx = p[0] - last[0];
+                let dy = p[1] - last[1];
+                if (dx * dx + dy * dy).sqrt() > 1e-4 {
+                    clean.push(p);
+                }
+            }
+        }
+
+        if clean.len() >= 4 {
+            let first = clean.first().unwrap();
+            let last = clean.last().unwrap();
+            let dx = first[0] - last[0];
+            let dy = first[1] - last[1];
+            if (dx * dx + dy * dy).sqrt() < 1e-4 {
+                clean.pop();
+            }
+        }
+
+        if clean.len() >= 3 && calc_polygon_area(&clean).abs() > 0.01 {
+            result_polygons.push(clean);
+        }
+    }
+
+    if result_polygons.is_empty() && !all_inside {
+        vec![subject]
+    } else {
+        result_polygons
+    }
+}
+
 impl ParcelData {
     /// Attempt to construct a `ParcelData` from an arbitrary entity in the CAD document.
     pub fn from_entity(entity: &EntityType) -> Option<Self> {
@@ -785,11 +1158,152 @@ impl ParcelData {
 
     /// Dynamically synchronizes parcel centroid labels (`PC-PARCEL-LABEL`) and table rows (`PC-TABLE`)
     /// across the CAD document when parcel properties or geometry are modified.
+    /// Resolves site topology overlaps for an active parcel (cutter):
+    /// Any existing parcel in the same site that overlaps `active_handle` is automatically
+    /// trimmed / clipped so that parcels within the same site never overlap.
+    pub fn resolve_site_topology_overlaps(
+        doc: &mut CadDocument,
+        active_handle: Option<Handle>,
+    ) -> usize {
+        let Some(active_h) = active_handle else {
+            return Self::resolve_all_site_overlaps(doc);
+        };
+
+        let Some(cutter) = Self::from_document_entity(doc, active_h) else {
+            return 0;
+        };
+
+        if cutter.vertices.len() < 3 || cutter.site_name.trim().is_empty() {
+            return 0;
+        }
+
+        let all_parcels = Self::all_parcels(doc);
+        let mut resolved_count = 0;
+
+        for other in all_parcels {
+            if other.handle == active_h {
+                continue;
+            }
+            if !other.site_name.eq_ignore_ascii_case(&cutter.site_name) {
+                continue; // Different sites are allowed to overlap!
+            }
+
+            // Quick AABB overlap check
+            if cutter.bbox_max[0] < other.bbox_min[0]
+                || cutter.bbox_min[0] > other.bbox_max[0]
+                || cutter.bbox_max[1] < other.bbox_min[1]
+                || cutter.bbox_min[1] > other.bbox_max[1]
+            {
+                continue;
+            }
+
+            // Compute difference: other \ cutter
+            let diff = polygon_difference(&other.vertices, &cutter.vertices);
+
+            if diff.is_empty() {
+                // `other` was completely engulfed by `cutter`!
+                let _ = doc.remove_entity(other.handle);
+                resolved_count += 1;
+            } else {
+                let best_poly = diff
+                    .into_iter()
+                    .max_by(|a, b| calc_polygon_area(a).abs().partial_cmp(&calc_polygon_area(b).abs()).unwrap())
+                    .unwrap();
+
+                let old_area = other.area_2d;
+                let new_area = calc_polygon_area(&best_poly).abs();
+
+                if (old_area - new_area).abs() > 0.05 && best_poly.len() >= 3 {
+                    if let Some(ent) = doc.get_entity_mut(other.handle) {
+                        if let EntityType::LwPolyline(lw) = ent {
+                            lw.vertices = best_poly
+                                .iter()
+                                .map(|pt| codec::entities::LwVertex::from_coords(pt[0], pt[1]))
+                                .collect();
+                            resolved_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        resolved_count
+    }
+
+    /// Resolves all overlapping parcels globally across each site in the drawing.
+    pub fn resolve_all_site_overlaps(doc: &mut CadDocument) -> usize {
+        let mut total_resolved = 0;
+        let mut passes = 0;
+
+        while passes < 5 {
+            passes += 1;
+            let parcels = Self::all_parcels(doc);
+            let mut resolved_in_pass = 0;
+
+            for i in 0..parcels.len() {
+                for j in (i + 1)..parcels.len() {
+                    let p1 = &parcels[i];
+                    let p2 = &parcels[j];
+
+                    if !p1.site_name.eq_ignore_ascii_case(&p2.site_name) {
+                        continue;
+                    }
+
+                    if p1.bbox_max[0] < p2.bbox_min[0]
+                        || p1.bbox_min[0] > p2.bbox_max[0]
+                        || p1.bbox_max[1] < p2.bbox_min[1]
+                        || p1.bbox_min[1] > p2.bbox_max[1]
+                    {
+                        continue;
+                    }
+
+                    let diff = polygon_difference(&p2.vertices, &p1.vertices);
+                    if diff.is_empty() {
+                        let _ = doc.remove_entity(p2.handle);
+                        resolved_in_pass += 1;
+                        break;
+                    } else {
+                        let best = diff.into_iter().max_by(|a, b| calc_polygon_area(a).abs().partial_cmp(&calc_polygon_area(b).abs()).unwrap()).unwrap();
+                        let old_area = p2.area_2d;
+                        let new_area = calc_polygon_area(&best).abs();
+                        if (old_area - new_area).abs() > 0.05 && best.len() >= 3 {
+                            if let Some(ent) = doc.get_entity_mut(p2.handle) {
+                                if let EntityType::LwPolyline(lw) = ent {
+                                    lw.vertices = best.iter().map(|pt| codec::entities::LwVertex::from_coords(pt[0], pt[1])).collect();
+                                    resolved_in_pass += 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if resolved_in_pass > 0 {
+                    break;
+                }
+            }
+
+            total_resolved += resolved_in_pass;
+            if resolved_in_pass == 0 {
+                break;
+            }
+        }
+
+        total_resolved
+    }
+
+
     pub fn sync_dynamic_parcels(
         doc: &mut CadDocument,
         target_handle: Option<Handle>,
         old_name: Option<&str>,
     ) -> usize {
+        // 0. Enforce site topology: resolve any overlaps within the same Site
+        if let Some(th) = target_handle {
+            Self::resolve_site_topology_overlaps(doc, Some(th));
+        } else {
+            Self::resolve_all_site_overlaps(doc);
+        }
+
         // 0. Clean up accidental XDATA on explicit non-parcel entities (such as PC-SETBACK or label entities)
         for ent in doc.entities_mut() {
             let layer = ent.common().layer.clone();
@@ -1816,5 +2330,4 @@ mod tests {
         );
     }
 }
-
 

@@ -6397,9 +6397,10 @@ impl OpenCADStudio {
             }
         }
 
+        let target_h = target_handles.and_then(|h| h.first().copied());
         let updated = crate::app::commands::civil_parcel::ParcelData::sync_dynamic_parcels(
             &mut tab.scene.document,
-            None,
+            target_h,
             None,
         );
         let hatches_synced = if let Some(styles_state) = &self.parcel_styles_state {
