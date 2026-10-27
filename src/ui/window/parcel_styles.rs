@@ -119,8 +119,8 @@ impl Default for ParcelStylesDialogState {
                     "Single-Family (Residential)",
                     "PC-RESIDENTIAL",
                     [235, 185, 50],
-                    true,
-                    "SOLID",
+                    false,
+                    "ANSI31",
                     1.0,
                     0.0,
                     80,
@@ -130,7 +130,7 @@ impl Default for ParcelStylesDialogState {
                     "Commercial",
                     "PC-COMMERCIAL",
                     [230, 80, 60],
-                    true,
+                    false,
                     "ANSI31",
                     2.0,
                     45.0,
@@ -141,8 +141,8 @@ impl Default for ParcelStylesDialogState {
                     "Park / Open Space",
                     "PC-PARK",
                     [50, 180, 80],
-                    true,
-                    "NET",
+                    false,
+                    "ANSI31",
                     2.5,
                     0.0,
                     70,
@@ -152,8 +152,8 @@ impl Default for ParcelStylesDialogState {
                     "Civic / Institutional",
                     "PC-CIVIC",
                     [50, 140, 230],
-                    true,
-                    "CROSS",
+                    false,
+                    "ANSI31",
                     2.0,
                     0.0,
                     70,
@@ -163,8 +163,8 @@ impl Default for ParcelStylesDialogState {
                     "Right-of-Way (Roads)",
                     "PC-ROW",
                     [140, 150, 160],
-                    true,
-                    "SOLID",
+                    false,
+                    "ANSI31",
                     1.0,
                     0.0,
                     85,
@@ -174,8 +174,8 @@ impl Default for ParcelStylesDialogState {
                     "Industrial",
                     "PC-INDUSTRIAL",
                     [160, 80, 220],
-                    true,
-                    "DOTS",
+                    false,
+                    "ANSI31",
                     2.0,
                     0.0,
                     65,
@@ -558,13 +558,20 @@ pub fn update_single_parcel_hatch(
     let styles = styles_state.map(|s| &s.styles).unwrap_or(&default_styles.styles);
     let rule = find_rule_for_zoning(zoning_or_style, styles);
 
-    let pattern = if !custom_pattern.is_empty() && custom_pattern != "DEFAULT" {
-        custom_pattern
+    let (should_hatch, pattern) = if !custom_pattern.is_empty() && custom_pattern != "DEFAULT" {
+        if custom_pattern.eq_ignore_ascii_case("NONE") {
+            (false, custom_pattern)
+        } else {
+            (true, custom_pattern)
+        }
     } else {
-        &rule.hatch_pattern
+        (
+            rule.enable_hatch && !rule.hatch_pattern.eq_ignore_ascii_case("NONE"),
+            rule.hatch_pattern.as_str(),
+        )
     };
 
-    if rule.enable_hatch && !pattern.eq_ignore_ascii_case("NONE") {
+    if should_hatch {
         let hatch_layer = format!("{}-HATCH", rule.layer);
         let zoning_color = Color::Rgb {
             r: rule.color_rgb[0],
@@ -1189,6 +1196,10 @@ mod tests {
         assert_eq!(state.styles[4].key, "ROW");
         assert_eq!(state.styles[5].key, "Industrial");
         assert!(state.auto_apply_to_new);
+        for s in &state.styles {
+            assert!(!s.enable_hatch, "Hatch fill must be disabled by default for {}", s.key);
+            assert_eq!(s.hatch_pattern, "ANSI31", "Hatch pattern must be ANSI31 by default for {}", s.key);
+        }
     }
 
     #[test]
@@ -1244,7 +1255,10 @@ mod tests {
         ent2.common_mut().extended_data.add_record(rec2);
         let h2 = doc.add_entity(ent2).unwrap();
 
-        let state = ParcelStylesDialogState::default();
+        let mut state = ParcelStylesDialogState::default();
+        for s in &mut state.styles {
+            s.enable_hatch = true;
+        }
         let (updated, hatches) = apply_thematic_styles_to_document(&mut doc, &state.styles);
         assert_eq!(updated, 2);
         assert_eq!(hatches, 2);

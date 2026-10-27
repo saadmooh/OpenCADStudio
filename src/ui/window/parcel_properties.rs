@@ -159,7 +159,7 @@ impl ParcelPropertiesState {
             mapcheck_precision: precision_str,
             mapcheck_passed: p.mapcheck_precision > 10_000.0,
             thematic_color,
-            hatch_pattern: "SOLID".to_string(),
+            hatch_pattern: "ANSI31".to_string(),
 
             area_2d: p.area_2d,
             perimeter: p.perimeter,
