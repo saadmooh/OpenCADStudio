@@ -59,6 +59,15 @@ impl OpenCADStudio {
         if let Some(handle) = committed {
             self.apply_continuous_constraints(i, &[handle]);
             self.notify_entities_committed(i, &[handle]);
+            if self.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .map(|e| crate::app::commands::civil_parcel::is_parcel_entity(e))
+                .unwrap_or(false)
+            {
+                self.sync_dynamic_parcels_on_change(i, None);
+            }
         }
         self.tabs[i].dirty = true;
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
@@ -191,6 +200,18 @@ impl OpenCADStudio {
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
         }
+
+        let touches_parcel = committed.iter().any(|&h| {
+            self.tabs[i]
+                .scene
+                .document
+                .get_entity(h)
+                .map(|e| crate::app::commands::civil_parcel::is_parcel_entity(e))
+                .unwrap_or(false)
+        });
+        if touches_parcel {
+            self.sync_dynamic_parcels_on_change(i, None);
+        }
     }
 
     pub(super) fn handle_commit_and_exit(
@@ -302,6 +323,17 @@ impl OpenCADStudio {
         }
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
+        }
+        if let Some(h) = committed {
+            if self.tabs[i]
+                .scene
+                .document
+                .get_entity(h)
+                .map(|e| crate::app::commands::civil_parcel::is_parcel_entity(e))
+                .unwrap_or(false)
+            {
+                self.sync_dynamic_parcels_on_change(i, None);
+            }
         }
         None
     }

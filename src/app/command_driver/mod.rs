@@ -780,6 +780,28 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::UpdateEntityContinue { handle, entity } => {
+                let i = self.active_tab;
+                if let Some(current) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    *current = entity;
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                    self.sync_dynamic_parcels_on_change(i, Some(&[handle]));
+                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].dirty = true;
+                    let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                    if let Some(p) = prompt {
+                        self.command_line.push_info(&p);
+                    }
+                    let opts = self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|c| c.options())
+                        .unwrap_or_default();
+                    self.command_line.set_step_options(opts);
+                }
+            }
             result @ CmdResult::AddParametricConstraint { .. } => {
                 if let Some(task) = self.handle_add_parametric_constraint(result) {
                     return task;

@@ -2547,6 +2547,45 @@ bg={bg_ms:.1}ms n={view_count}"
                     viewport_stack = viewport_stack.push(text_inline_overlay(ed, canvas));
                 }
             }
+
+            // Modeless floating Civil 3D Parcel Layout Tools toolbar/palette
+            if !tab.is_start && self.show_parcel_layout_tools {
+                if let Some(state) = &self.parcel_layout_state {
+                    viewport_stack = viewport_stack.push(position_canvas_overlay(
+                        self.parcel_palette_anchor,
+                        crate::ui::window::parcel_layout_tools::view_floating_palette(
+                            state,
+                            self.parcel_layout_tools_collapsed,
+                        ),
+                    ));
+                }
+            }
+
+            // Modeless floating Civil 3D Profile View Creation Dialog (appears before placement)
+            if !tab.is_start && self.show_profile_view_creation_dialog {
+                if let Some(state) = &self.profile_view_properties_state {
+                    viewport_stack = viewport_stack.push(position_canvas_overlay(
+                        self.profile_creation_dialog_anchor,
+                        crate::ui::window::profile_view_properties::view_creation_dialog(
+                            state,
+                            &self.available_alignments_cache,
+                        ),
+                    ));
+                }
+            }
+
+            // Modeless floating Civil 3D Profile Layout Tools toolbar/palette (appears after placement)
+            if !tab.is_start && self.show_profile_layout_tools {
+                if let Some(state) = &self.profile_view_properties_state {
+                    viewport_stack = viewport_stack.push(position_canvas_overlay(
+                        self.profile_palette_anchor,
+                        crate::ui::window::profile_view_properties::view_floating_palette(
+                            state,
+                            self.profile_palette_collapsed,
+                        ),
+                    ));
+                }
+            }
         }
 
         if self.show_node_graph && !tab.is_start {
@@ -3382,6 +3421,19 @@ impl OpenCADStudio {
                 }
             })
         };
+        let window_drag_events = if self.is_any_window_dragging() {
+            event::listen_with(|ev, _status, _win_id| match ev {
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::GlobalCursorMoved(position))
+                }
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::GlobalPointerReleased),
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
         #[cfg(not(target_arch = "wasm32"))]
         let control = iced::Subscription::batch([
             super::control::subscribe().map(Message::ControlRequest),
@@ -3431,6 +3483,7 @@ impl OpenCADStudio {
             single_instance,
             hatch_pattern_keys,
             keyboard_events,
+            window_drag_events,
             ui_font_changes(),
         ])
     }

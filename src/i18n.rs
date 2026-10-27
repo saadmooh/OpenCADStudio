@@ -245,13 +245,44 @@ pub fn loader() -> &'static FluentLanguageLoader {
     })
 }
 
+static CURRENT_LANGUAGE: std::sync::RwLock<Language> = std::sync::RwLock::new(Language::System);
+
+pub fn active_language() -> Language {
+    let lang = CURRENT_LANGUAGE
+        .read()
+        .map(|guard| *guard)
+        .unwrap_or(Language::System);
+    if lang == Language::System {
+        let tag = active_language_tag();
+        if tag.starts_with("ar") {
+            Language::ArSa
+        } else if tag.starts_with("fr") {
+            Language::FrFr
+        } else {
+            Language::EnUs
+        }
+    } else {
+        lang
+    }
+}
+
+pub fn lang_str<'a>(en: &'a str, ar: &'a str, fr: &'a str) -> &'a str {
+    match active_language() {
+        Language::ArSa => ar,
+        Language::FrFr => fr,
+        _ => en,
+    }
+}
+
 /// Apply a user preference process-wide. The loader swaps resources atomically,
 /// so the next Iced view pass immediately receives the new language.
 pub fn set_language(language: Language) -> Result<(), i18n_embed::I18nEmbedError> {
+    if let Ok(mut lock) = CURRENT_LANGUAGE.write() {
+        *lock = language;
+    }
     load_language(loader(), language)
 }
 
-#[cfg(target_arch = "wasm32")]
 pub fn active_language_tag() -> String {
     loader()
         .current_languages()
@@ -259,6 +290,361 @@ pub fn active_language_tag() -> String {
         .next()
         .unwrap_or_else(|| loader().fallback_language().clone())
         .to_string()
+}
+
+pub fn display_parcel_term(term: &str) -> String {
+    let lang = active_language();
+    match term {
+        // Remainder
+        "Place remainder in last parcel" => match lang {
+            Language::ArSa => "وضع المتبقي في آخر قطعة".to_string(),
+            Language::FrFr => "Placer le reliquat dans la dernière".to_string(),
+            _ => term.to_string(),
+        },
+        "Redistribute remainder" => match lang {
+            Language::ArSa => "إعادة توزيع المتبقي".to_string(),
+            Language::FrFr => "Redistribuer le reliquat".to_string(),
+            _ => term.to_string(),
+        },
+        "Create remainder parcel" => match lang {
+            Language::ArSa => "إنشاء قطعة مستقلة للمتبقي".to_string(),
+            Language::FrFr => "Créer une parcelle de reliquat".to_string(),
+            _ => term.to_string(),
+        },
+        // Solution Preferences
+        "Use shortest frontage" => match lang {
+            Language::ArSa => "استخدام أقصر واجهة".to_string(),
+            Language::FrFr => "Utiliser la plus petite façade".to_string(),
+            _ => term.to_string(),
+        },
+        "Use smallest area" => match lang {
+            Language::ArSa => "استخدام أصغر مساحة".to_string(),
+            Language::FrFr => "Utiliser la plus petite surface".to_string(),
+            _ => term.to_string(),
+        },
+        "Use largest frontage" => match lang {
+            Language::ArSa => "استخدام أكبر واجهة".to_string(),
+            Language::FrFr => "Utiliser la plus grande façade".to_string(),
+            _ => term.to_string(),
+        },
+        // Parcel Styles
+        "Single-Family" => match lang {
+            Language::ArSa => "سكني عائلي (Single-Family)".to_string(),
+            Language::FrFr => "Résidentiel unifamilial".to_string(),
+            _ => term.to_string(),
+        },
+        "Commercial" => match lang {
+            Language::ArSa => "تجاري (Commercial)".to_string(),
+            Language::FrFr => "Commercial".to_string(),
+            _ => term.to_string(),
+        },
+        "Civic" => match lang {
+            Language::ArSa => "خدمي / عام (Civic)".to_string(),
+            Language::FrFr => "Public / Civique".to_string(),
+            _ => term.to_string(),
+        },
+        "Park / Open Space" => match lang {
+            Language::ArSa => "حدائق ومساحات مفتوحة".to_string(),
+            Language::FrFr => "Parc / Espace vert".to_string(),
+            _ => term.to_string(),
+        },
+        "Standard" => match lang {
+            Language::ArSa => "قياسي (Standard)".to_string(),
+            Language::FrFr => "Standard".to_string(),
+            _ => term.to_string(),
+        },
+        "Property" => match lang {
+            Language::ArSa => "ملكية عقارية (Property)".to_string(),
+            Language::FrFr => "Propriété".to_string(),
+            _ => term.to_string(),
+        },
+        "Multi-Family Residential" => match lang {
+            Language::ArSa => "سكني متعدد الأسر".to_string(),
+            Language::FrFr => "Résidentiel multifamilial".to_string(),
+            _ => term.to_string(),
+        },
+        "Industrial / Logistics" => match lang {
+            Language::ArSa => "صناعي / لوجستي".to_string(),
+            Language::FrFr => "Industriel / Logistique".to_string(),
+            _ => term.to_string(),
+        },
+        // Area Labels
+        "Parcel Name, Area & Perimeter" => match lang {
+            Language::ArSa => "الاسم والمساحة والمحيط".to_string(),
+            Language::FrFr => "Nom, surface & périmètre".to_string(),
+            _ => term.to_string(),
+        },
+        "Parcel Name & Area" => match lang {
+            Language::ArSa => "الاسم والمساحة".to_string(),
+            Language::FrFr => "Nom & surface".to_string(),
+            _ => term.to_string(),
+        },
+        "Name Only" => match lang {
+            Language::ArSa => "الاسم فقط".to_string(),
+            Language::FrFr => "Nom seul".to_string(),
+            _ => term.to_string(),
+        },
+        "Area Only" => match lang {
+            Language::ArSa => "المساحة فقط".to_string(),
+            Language::FrFr => "Surface seule".to_string(),
+            _ => term.to_string(),
+        },
+        "Square Meters & Acres" => match lang {
+            Language::ArSa => "أمتار مربعة وفدان".to_string(),
+            Language::FrFr => "Mètres carrés & Acres".to_string(),
+            _ => term.to_string(),
+        },
+        // Line Labels
+        "Bearing over Distance" => match lang {
+            Language::ArSa => "الاتجاه والمسافة".to_string(),
+            Language::FrFr => "Gisement et distance".to_string(),
+            _ => term.to_string(),
+        },
+        "Distance Only" => match lang {
+            Language::ArSa => "المسافة فقط".to_string(),
+            Language::FrFr => "Distance seule".to_string(),
+            _ => term.to_string(),
+        },
+        "Bearing Only" => match lang {
+            Language::ArSa => "الاتجاه فقط".to_string(),
+            Language::FrFr => "Gisement seul".to_string(),
+            _ => term.to_string(),
+        },
+        // Curve Labels
+        "Distance over Radius" => match lang {
+            Language::ArSa => "المسافة ونصف القطر".to_string(),
+            Language::FrFr => "Longueur et rayon".to_string(),
+            _ => term.to_string(),
+        },
+        "Delta over Length" => match lang {
+            Language::ArSa => "الزاوية والطول".to_string(),
+            Language::FrFr => "Delta et longueur".to_string(),
+            _ => term.to_string(),
+        },
+        "Radius over Length" => match lang {
+            Language::ArSa => "نصف القطر والطول".to_string(),
+            Language::FrFr => "Rayon et longueur".to_string(),
+            _ => term.to_string(),
+        },
+        "Length Only" => match lang {
+            Language::ArSa => "الطول فقط".to_string(),
+            Language::FrFr => "Longueur seule".to_string(),
+            _ => term.to_string(),
+        },
+        "Radius Only" => match lang {
+            Language::ArSa => "نصف القطر فقط".to_string(),
+            Language::FrFr => "Rayon seul".to_string(),
+            _ => term.to_string(),
+        },
+        "None" => match lang {
+            Language::ArSa => "بدون".to_string(),
+            Language::FrFr => "Aucun".to_string(),
+            _ => term.to_string(),
+        },
+        // Zoning
+        "Single-Family Residential (R-1)" => match lang {
+            Language::ArSa => "سكني فردي (R-1)".to_string(),
+            Language::FrFr => "Résidentiel unifamilial (R-1)".to_string(),
+            _ => term.to_string(),
+        },
+        "Two-Family Residential (R-2)" => match lang {
+            Language::ArSa => "سكني مزدوج (R-2)".to_string(),
+            Language::FrFr => "Résidentiel bifamilial (R-2)".to_string(),
+            _ => term.to_string(),
+        },
+        "Multi-Family Residential (R-3)" => match lang {
+            Language::ArSa => "سكني متعدد (R-3)".to_string(),
+            Language::FrFr => "Résidentiel multifamilial (R-3)".to_string(),
+            _ => term.to_string(),
+        },
+        "Commercial / Retail (C-1)" => match lang {
+            Language::ArSa => "تجاري / تجزئة (C-1)".to_string(),
+            Language::FrFr => "Commercial / Vente (C-1)".to_string(),
+            _ => term.to_string(),
+        },
+        "Mixed-Use Town Center (MU-1)" => match lang {
+            Language::ArSa => "استخدام مختلط (MU-1)".to_string(),
+            Language::FrFr => "Usage mixte (MU-1)".to_string(),
+            _ => term.to_string(),
+        },
+        "Civic / Institutional (PUB)" => match lang {
+            Language::ArSa => "مباني عامة ومرافق (PUB)".to_string(),
+            Language::FrFr => "Édifices publics (PUB)".to_string(),
+            _ => term.to_string(),
+        },
+        "Parks & Open Space (REC)" => match lang {
+            Language::ArSa => "حدائق ومنتزهات (REC)".to_string(),
+            Language::FrFr => "Parcs & Loisirs (REC)".to_string(),
+            _ => term.to_string(),
+        },
+        other => other.to_string(),
+    }
+}
+
+fn translate_parcels_term(source: &str) -> Option<String> {
+    let candidate = display_parcel_term(source);
+    if candidate != source {
+        return Some(candidate);
+    }
+    let lang = active_language();
+    match source {
+        "Parcels" => Some(match lang {
+            Language::ArSa => "قطع الأراضي".to_string(),
+            Language::FrFr => "Parcelles".to_string(),
+            _ => "Parcels".to_string(),
+        }),
+        "Parcel Layout" => Some(match lang {
+            Language::ArSa => "تخطيط الأراضي".to_string(),
+            Language::FrFr => "Disposition des parcelles".to_string(),
+            _ => "Parcel Layout".to_string(),
+        }),
+        "Layout Tools" => Some(match lang {
+            Language::ArSa => "أدوات التخطيط".to_string(),
+            Language::FrFr => "Outils de disposition".to_string(),
+            _ => "Layout Tools".to_string(),
+        }),
+        "Right-of-Way" => Some(match lang {
+            Language::ArSa => "حرم الطريق (ROW)".to_string(),
+            Language::FrFr => "Emprise (ROW)".to_string(),
+            _ => "Right-of-Way".to_string(),
+        }),
+        "Create ROW" => Some(match lang {
+            Language::ArSa => "إنشاء حرم الطريق".to_string(),
+            Language::FrFr => "Créer emprise".to_string(),
+            _ => "Create ROW".to_string(),
+        }),
+        "Tables" => Some(match lang {
+            Language::ArSa => "الجداول".to_string(),
+            Language::FrFr => "Tables".to_string(),
+            _ => "Tables".to_string(),
+        }),
+        "Area Table" => Some(match lang {
+            Language::ArSa => "جدول المساحات".to_string(),
+            Language::FrFr => "Table des surfaces".to_string(),
+            _ => "Area Table".to_string(),
+        }),
+        "Line Table" => Some(match lang {
+            Language::ArSa => "جدول الخطوط".to_string(),
+            Language::FrFr => "Table des lignes".to_string(),
+            _ => "Line Table".to_string(),
+        }),
+        "Curve Table" => Some(match lang {
+            Language::ArSa => "جدول المنحنيات".to_string(),
+            Language::FrFr => "Table des courbes".to_string(),
+            _ => "Curve Table".to_string(),
+        }),
+        "Styles & Envelopes" => Some(match lang {
+            Language::ArSa => "الأنماط والارتدادات".to_string(),
+            Language::FrFr => "Styles & Enveloppes".to_string(),
+            _ => "Styles & Envelopes".to_string(),
+        }),
+        "Thematic Zoning" => Some(match lang {
+            Language::ArSa => "التخصيص اللوني".to_string(),
+            Language::FrFr => "Zonage thématique".to_string(),
+            _ => "Thematic Zoning".to_string(),
+        }),
+        "Setbacks" => Some(match lang {
+            Language::ArSa => "الارتدادات".to_string(),
+            Language::FrFr => "Marges de recul".to_string(),
+            _ => "Setbacks".to_string(),
+        }),
+        "Analysis & Legal" => Some(match lang {
+            Language::ArSa => "التحليل والتوثيق".to_string(),
+            Language::FrFr => "Analyse & Juridique".to_string(),
+            _ => "Analysis & Legal".to_string(),
+        }),
+        "Mapcheck" => Some(match lang {
+            Language::ArSa => "فحص الإغلاق".to_string(),
+            Language::FrFr => "Contrôle de fermeture".to_string(),
+            _ => "Mapcheck".to_string(),
+        }),
+        "Balance Traverse" => Some(match lang {
+            Language::ArSa => "موازنة المضلع".to_string(),
+            Language::FrFr => "Compenser cheminement".to_string(),
+            _ => "Balance Traverse".to_string(),
+        }),
+        "Legal Deed" => Some(match lang {
+            Language::ArSa => "الصك القانوني".to_string(),
+            Language::FrFr => "Acte juridique".to_string(),
+            _ => "Legal Deed".to_string(),
+        }),
+        "Renumber" => Some(match lang {
+            Language::ArSa => "إعادة الترقيم".to_string(),
+            Language::FrFr => "Renuméroter".to_string(),
+            _ => "Renumber".to_string(),
+        }),
+        "Report" => Some(match lang {
+            Language::ArSa => "تقرير التقسيم".to_string(),
+            Language::FrFr => "Rapport".to_string(),
+            _ => "Report".to_string(),
+        }),
+        "GIS & Interop" => Some(match lang {
+            Language::ArSa => "نظم المعلومات والتبادل".to_string(),
+            Language::FrFr => "SIG & Interopérabilité".to_string(),
+            _ => "GIS & Interop".to_string(),
+        }),
+        "GeoJSON In" => Some(match lang {
+            Language::ArSa => "استيراد GeoJSON".to_string(),
+            Language::FrFr => "Importer GeoJSON".to_string(),
+            _ => "GeoJSON In".to_string(),
+        }),
+        "GeoJSON Out" => Some(match lang {
+            Language::ArSa => "تصدير GeoJSON".to_string(),
+            Language::FrFr => "Exporter GeoJSON".to_string(),
+            _ => "GeoJSON Out".to_string(),
+        }),
+        "LandXML In" => Some(match lang {
+            Language::ArSa => "استيراد LandXML".to_string(),
+            Language::FrFr => "Importer LandXML".to_string(),
+            _ => "LandXML In".to_string(),
+        }),
+        "Export CSV" => Some(match lang {
+            Language::ArSa => "تصدير CSV".to_string(),
+            Language::FrFr => "Exporter CSV".to_string(),
+            _ => "Export CSV".to_string(),
+        }),
+        "Import Parcels from GeoJSON" => Some(match lang {
+            Language::ArSa => "استيراد قطع الأراضي من ملف GeoJSON".to_string(),
+            Language::FrFr => "Importer des parcelles depuis GeoJSON".to_string(),
+            _ => "Import Parcels from GeoJSON".to_string(),
+        }),
+        "GeoJSON file" => Some(match lang {
+            Language::ArSa => "ملف GeoJSON".to_string(),
+            Language::FrFr => "Fichier GeoJSON".to_string(),
+            _ => "GeoJSON file".to_string(),
+        }),
+        "Import Parcels from LandXML" => Some(match lang {
+            Language::ArSa => "استيراد قطع الأراضي من ملف LandXML".to_string(),
+            Language::FrFr => "Importer des parcelles depuis LandXML".to_string(),
+            _ => "Import Parcels from LandXML".to_string(),
+        }),
+        "LandXML file" => Some(match lang {
+            Language::ArSa => "ملف LandXML".to_string(),
+            Language::FrFr => "Fichier LandXML".to_string(),
+            _ => "LandXML file".to_string(),
+        }),
+        "Parcel Layout Tools" => Some(match lang {
+            Language::ArSa => "أدوات تخطيط قطع الأراضي".to_string(),
+            Language::FrFr => "Outils de disposition des parcelles".to_string(),
+            _ => "Parcel Layout Tools".to_string(),
+        }),
+        "Create Parcels - Layout" => Some(match lang {
+            Language::ArSa => "إنشاء قطع الأراضي - التخطيط".to_string(),
+            Language::FrFr => "Créer des parcelles - Disposition".to_string(),
+            _ => "Create Parcels - Layout".to_string(),
+        }),
+        "Parcel Properties" => Some(match lang {
+            Language::ArSa => "خصائص قطعة الأرض".to_string(),
+            Language::FrFr => "Propriétés de la parcelle".to_string(),
+            _ => "Parcel Properties".to_string(),
+        }),
+        "Civil 3D Renumber: Click parcels or press Enter for fence mode." => Some(match lang {
+            Language::ArSa => "إعادة الترقيم: انقر على قطع الأراضي أو اضغط Enter لوضع السياج.".to_string(),
+            Language::FrFr => "Renumérotation : Cliquez sur les parcelles ou appuyez sur Entrée pour le mode clôture.".to_string(),
+            _ => "Civil 3D Renumber: Click parcels or press Enter for fence mode.".to_string(),
+        }),
+        _ => None,
+    }
 }
 
 /// Catalog ids of a source string, memoized per thread. The catalog is one
@@ -293,6 +679,9 @@ fn catalog_ids(source: &str) -> Option<(&'static str, &'static str)> {
 /// translatable data.
 pub fn translate(source: impl AsRef<str>) -> Cow<'static, str> {
     let source = source.as_ref();
+    if let Some(parcels_term) = translate_parcels_term(source) {
+        return Cow::Owned(parcels_term);
+    }
     catalog_ids(source)
         .map(|(message_id, attribute_id)| Cow::Owned(loader().get_attr(message_id, attribute_id)))
         .unwrap_or_else(|| Cow::Owned(source.to_string()))
@@ -395,6 +784,11 @@ pub fn ribbon_module_title(id: &str, fallback: &str) -> String {
         "manage" => crate::tr!("ribbon-tab", "manage"),
         "view" => crate::tr!("ribbon-tab", "view"),
         "block_editor" => crate::tr!("ribbon-tab", "block-editor"),
+        "parcels" => match active_language() {
+            Language::ArSa => "قطع الأراضي".to_string(),
+            Language::FrFr => "Parcelles".to_string(),
+            _ => "Parcels".to_string(),
+        },
         _ => fallback.to_string(),
     }
 }

@@ -321,7 +321,7 @@ pub fn create_parcel_hatch_entity(
         }
     }
 
-    let mut ent = EntityType::Hatch(hatch);
+    let mut ent = EntityType::Hatch(Box::new(hatch));
     let common = ent.common_mut();
     common.layer = layer.to_string();
     common.owner_handle = owner_handle;

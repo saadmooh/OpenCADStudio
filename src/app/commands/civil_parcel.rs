@@ -1133,7 +1133,7 @@ impl ParcelData {
                     m.rectangle_width = safe_w;
                     m.insertion_point = pos;
                     m.is_annotative = true;
-                    let mut ent = EntityType::MText(m);
+                    let mut ent = EntityType::MText(Box::new(m));
                     ent.common_mut().layer = "PC-PARCEL-LABEL".to_string();
                     let mut rec = ExtendedDataRecord::new("OPENCAD_PARCEL_LABEL");
                     rec.add_value(XDataValue::String(parcel.name.clone()));
@@ -1219,7 +1219,7 @@ impl ParcelData {
                         m.rectangle_width = safe_w;
                         m.insertion_point = pos;
                         m.is_annotative = true;
-                        let mut e = EntityType::MText(m);
+                        let mut e = EntityType::MText(Box::new(m));
                         e.common_mut().layer = "PC-PARCEL-LABEL".to_string();
                         let mut rec = ExtendedDataRecord::new("OPENCAD_PARCEL_LABEL");
                         rec.add_value(XDataValue::String(parcel.name.clone()));
@@ -1361,7 +1361,7 @@ impl ParcelData {
                     m.insertion_point = Vector3::new(insert_x, insert_y, 0.0);
                     m.is_annotative = true;
 
-                    let mut ent_seg = EntityType::MText(m);
+                    let mut ent_seg = EntityType::MText(Box::new(m));
                     ent_seg.common_mut().layer = seg_layer.clone();
 
                     let mut rec_seg = ExtendedDataRecord::new("OPENCAD_PARCEL_SEGMENT_LABEL");
@@ -1741,7 +1741,7 @@ mod tests {
         let labels: Vec<MText> = doc.entities().filter_map(|e| {
             if e.common().layer == "PC-PARCEL-LABEL" {
                 if let EntityType::MText(m) = e {
-                    Some(m.clone())
+                    Some((**m).clone())
                 } else {
                     None
                 }
@@ -1798,7 +1798,7 @@ mod tests {
         let scaled_labels: Vec<MText> = doc.entities().filter_map(|e| {
             if e.common().layer == "PC-PARCEL-LABEL" {
                 if let EntityType::MText(m) = e {
-                    Some(m.clone())
+                    Some((**m).clone())
                 } else {
                     None
                 }

@@ -1022,6 +1022,7 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("CAL")
             || tokens[0].eq_ignore_ascii_case("QUICKCALC")
             || tokens[0].eq_ignore_ascii_case("QC")
+            || tokens[0].to_ascii_uppercase().starts_with("SURFACE")
         {
             return self.dispatch_command(cmd);
         }

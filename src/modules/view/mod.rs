@@ -18,6 +18,7 @@ mod sheetset;
 mod tile_horiz;
 mod tile_vert;
 mod tool_palettes;
+mod toolspace;
 pub mod ucs_cmd;
 mod ucs_icon;
 pub mod view_cmd;
@@ -122,6 +123,7 @@ impl CadModule for ViewModule {
                 RibbonGroup {
                     title: "Palettes",
                     tools: vec![
+                        RibbonItem::LargeTool(toolspace::tool()),
                         RibbonItem::LargeTool(tool_palettes::tool()),
                         RibbonItem::LargeTool(properties_palette::tool()),
                         RibbonItem::LargeTool(count_palette::tool()),

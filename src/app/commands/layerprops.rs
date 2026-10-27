@@ -705,21 +705,18 @@ impl OpenCADStudio {
                 }
                 self.open_sketch(i);
             }
-            // BROWSER — toggle the docked outline of planes, sketch and bodies.
-            "BROWSER" => {
+            // BROWSER / PROSPECTOR / TOOLSPACE — toggle/open the Prospector tree.
+            "BROWSER" | "PROSPECTOR" | "TOOLSPACE" => {
+                let id = crate::ui::dock::PanelId::Browser;
                 self.show_browser ^= true;
                 if self.show_browser {
-                    // Dock it on first use rather than shipping it in the
-                    // default layout: an existing user's edges should not
-                    // rearrange themselves on upgrade for a panel they have
-                    // not asked for.
-                    let id = crate::ui::dock::PanelId::Browser;
                     self.dock_open_at_default(id);
                     self.command_line
-                        .push_output(crate::t!("Browser opened.").as_ref());
+                        .push_output("✔ Prospector / Toolspace panel opened.");
                 } else {
+                    self.dock_unpeek(id);
                     self.command_line
-                        .push_output(crate::t!("Browser closed.").as_ref());
+                        .push_output("Prospector / Toolspace panel closed.");
                 }
             }
             "FINISHSKETCH" => {

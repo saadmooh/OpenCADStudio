@@ -6864,6 +6864,1455 @@ impl OpenCADStudio {
                 self.drafting_settings_close_confirm = false;
                 Task::none()
             }
+            // ── Surface Properties Dialog ─────────────────────────────────────────
+            Message::OpenSurfaceProperties(handle) => {
+                let tab_idx = self.active_tab;
+                if let Some(tab) = self.tabs.get(tab_idx) {
+                    if let Some(surf) = crate::app::commands::civil_surface::TinSurfaceData::from_document_entity(&tab.scene.document, handle) {
+                        self.surface_properties_state = Some(crate::ui::window::surface_properties::SurfacePropertiesState::from_surface(&surf));
+                        self.active_modal = Some(super::ModalKind::SurfaceProperties);
+                    }
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesTabChanged(tab) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.active_tab = tab;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesNameChanged(name) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.name = name;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesDescriptionChanged(desc) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.description = desc;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesStyleChanged(style) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.selected_style = style;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesMaterialChanged(mat) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.selected_material = mat;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesToggleLocked => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.object_locked = !state.object_locked;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesToggleTooltips => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.show_tooltips = !state.show_tooltips;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMinToggled(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_min_elev_enabled = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMinChanged(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_min_elev = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMaxToggled(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_max_elev_enabled = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesExcludeMaxChanged(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.exclude_max_elev = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesMaxTriToggled(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.max_tri_length_enabled = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesMaxTriChanged(val) => {
+                if let Some(state) = &mut self.surface_properties_state {
+                    state.max_tri_length = val;
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesApply => {
+                if let Some(state) = &self.surface_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let style_short = if state.selected_style.contains("Triangles Only") {
+                            "TRIANGLES"
+                        } else if state.selected_style.contains("Contours and Triangles") {
+                            "BOTH"
+                        } else if state.selected_style.contains("Border Only") {
+                            "BORDER"
+                        } else if state.selected_style.contains("_No Display") {
+                            "OFF"
+                        } else {
+                            "CONTOURS"
+                        };
+                        let _ = crate::app::commands::civil_surface::apply_surface_style(&mut tab.scene.document, state.handle, style_short);
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                    }
+                }
+                Task::none()
+            }
+            Message::SurfacePropertiesOk => {
+                if let Some(state) = &self.surface_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let style_short = if state.selected_style.contains("Triangles Only") {
+                            "TRIANGLES"
+                        } else if state.selected_style.contains("Contours and Triangles") {
+                            "BOTH"
+                        } else if state.selected_style.contains("Border Only") {
+                            "BORDER"
+                        } else if state.selected_style.contains("_No Display") {
+                            "OFF"
+                        } else {
+                            "CONTOURS"
+                        };
+                        let _ = crate::app::commands::civil_surface::apply_surface_style(&mut tab.scene.document, state.handle, style_short);
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                    }
+                }
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::SurfacePropertiesClose => {
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::SurfacePropertiesHelp => {
+                self.command_line.push_info("Surface Properties: Manage surface identity, Civil 3D styles, definition parameters, analysis bands, and geometric statistics.");
+                Task::none()
+            }
+            Message::SurfacePropertiesRebuild => {
+                if let Some(state) = &self.surface_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                    }
+                    self.command_line.push_output(&format!("✔ Rebuilt surface '{}' [{:X}].", state.name, state.handle.value()));
+                }
+                Task::none()
+            }
+            // ── Parcel Properties Dialog ──────────────────────────────────────────
+            Message::OpenParcelProperties(handle) => {
+                let tab_idx = self.active_tab;
+                if let Some(tab) = self.tabs.get(tab_idx) {
+                    if let Some(parcel) = crate::app::commands::civil_parcel::ParcelData::from_document_entity(&tab.scene.document, handle) {
+                        self.parcel_properties_state = Some(crate::ui::window::parcel_properties::ParcelPropertiesState::from_parcel(&parcel));
+                        self.active_modal = Some(super::ModalKind::ParcelProperties);
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesTabChanged(tab) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.active_tab = tab;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesNameChanged(name) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.name = name;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesNumberChanged(num_str) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    if let Ok(num) = num_str.parse::<u32>() {
+                        state.number = num;
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesSiteChanged(site) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.site = site;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesDescriptionChanged(desc) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.description = desc;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesStyleChanged(style) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.selected_style = style;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesAreaLabelStyleChanged(style) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.area_label_style = style;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesLineLabelStyleChanged(style) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.line_label_style = style;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesCurveLabelStyleChanged(style) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.curve_label_style = style;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesToggleSegmentLabels(val) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.auto_add_segment_labels = val;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesSegmentLayerChanged(layer) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.segment_layer = layer;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesLayerChanged(layer) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.selected_layer = layer;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesZoningChanged(zoning) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.zoning = zoning.clone();
+                    state.thematic_color = if zoning.contains("Commercial") {
+                        iced::Color::from_rgb(0.90, 0.35, 0.25)
+                    } else if zoning.contains("Civic") {
+                        iced::Color::from_rgb(0.20, 0.60, 0.90)
+                    } else if zoning.contains("Park") {
+                        iced::Color::from_rgb(0.30, 0.75, 0.35)
+                    } else {
+                        iced::Color::from_rgb(0.92, 0.72, 0.20)
+                    };
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesOwnerChanged(owner) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.owner = owner;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesDeedChanged(deed) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.deed_no = deed;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesTaxIdChanged(tax) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.tax_id = tax;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesAddressChanged(addr) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.address = addr;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesAssessmentChanged(val) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.assessment_val = val;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesLandUseChanged(lu) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.land_use = lu;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesHatchChanged(hatch) => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.hatch_pattern = hatch;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesToggleLocked => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.object_locked = !state.object_locked;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesToggleTooltips => {
+                if let Some(state) = &mut self.parcel_properties_state {
+                    state.show_tooltips = !state.show_tooltips;
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesApply => {
+                if let Some(state) = &self.parcel_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let old_name = crate::app::commands::civil_parcel::ParcelData::from_document_entity(&tab.scene.document, state.handle)
+                            .map(|p| p.name);
+
+                        crate::app::commands::civil_parcel::ParcelData::update_entity_xdata_full(
+                            &mut tab.scene.document,
+                            state.handle,
+                            &state.name,
+                            state.number,
+                            &state.site,
+                            &state.selected_style,
+                            &state.owner,
+                            &state.deed_no,
+                            &state.tax_id,
+                            &state.selected_layer,
+                            &state.area_label_style,
+                            &state.line_label_style,
+                            &state.curve_label_style,
+                            state.auto_add_segment_labels,
+                            &state.segment_layer,
+                        );
+
+                        crate::ui::window::parcel_styles::update_single_parcel_hatch(
+                            &mut tab.scene.document,
+                            state.handle,
+                            &state.selected_style,
+                            &state.hatch_pattern,
+                            self.parcel_styles_state.as_ref(),
+                        );
+
+                        let sync_count = crate::app::commands::civil_parcel::ParcelData::sync_dynamic_parcels(
+                            &mut tab.scene.document,
+                            Some(state.handle),
+                            old_name.as_deref(),
+                        );
+
+                        tab.scene.populate_hatches_from_document();
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                        self.command_line.push_output(&format!("✔ Applied parcel properties to '{}' [{:X}] ({} dynamic label/table item(s) synchronized).", state.name, state.handle.value(), sync_count));
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelPropertiesOk => {
+                if let Some(state) = &self.parcel_properties_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let old_name = crate::app::commands::civil_parcel::ParcelData::from_document_entity(&tab.scene.document, state.handle)
+                            .map(|p| p.name);
+
+                        crate::app::commands::civil_parcel::ParcelData::update_entity_xdata_full(
+                            &mut tab.scene.document,
+                            state.handle,
+                            &state.name,
+                            state.number,
+                            &state.site,
+                            &state.selected_style,
+                            &state.owner,
+                            &state.deed_no,
+                            &state.tax_id,
+                            &state.selected_layer,
+                            &state.area_label_style,
+                            &state.line_label_style,
+                            &state.curve_label_style,
+                            state.auto_add_segment_labels,
+                            &state.segment_layer,
+                        );
+
+                        crate::ui::window::parcel_styles::update_single_parcel_hatch(
+                            &mut tab.scene.document,
+                            state.handle,
+                            &state.selected_style,
+                            &state.hatch_pattern,
+                            self.parcel_styles_state.as_ref(),
+                        );
+
+                        let sync_count = crate::app::commands::civil_parcel::ParcelData::sync_dynamic_parcels(
+                            &mut tab.scene.document,
+                            Some(state.handle),
+                            old_name.as_deref(),
+                        );
+
+                        tab.scene.populate_hatches_from_document();
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                        self.command_line.push_output(&format!("✔ Committed parcel properties for '{}' [{:X}] ({} dynamic label/table item(s) synchronized).", state.name, state.handle.value(), sync_count));
+                    }
+                }
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ParcelPropertiesClose => {
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ParcelPropertiesHelp => {
+                self.command_line.push_info("Parcel Properties: Manage cadastral identity, Civil 3D styles, legal ownership, mapcheck closure analysis, and geometric statistics.");
+                Task::none()
+            }
+            // ── Parcel Zoning & Thematic Styles Dialog ───────────────────
+            Message::OpenParcelStylesDialog => {
+                if self.parcel_styles_state.is_none() {
+                    self.parcel_styles_state = Some(crate::ui::window::parcel_styles::ParcelStylesDialogState::default());
+                }
+                self.active_modal = Some(super::ModalKind::ParcelStyles);
+                Task::none()
+            }
+            Message::ParcelStylesSelectStyle(idx) => {
+                if let Some(st) = &mut self.parcel_styles_state {
+                    st.selected_index = idx;
+                }
+                Task::none()
+            }
+            Message::ParcelStylesToggleHatch(idx, val) => {
+                if let Some(st) = &mut self.parcel_styles_state {
+                    if let Some(s) = st.styles.get_mut(idx) {
+                        s.enable_hatch = val;
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelStylesPatternChanged(idx, pat) => {
+                if let Some(st) = &mut self.parcel_styles_state {
+                    if let Some(s) = st.styles.get_mut(idx) {
+                        s.hatch_pattern = pat;
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelStylesColorPreset(idx, rgb) => {
+                if let Some(st) = &mut self.parcel_styles_state {
+                    if let Some(s) = st.styles.get_mut(idx) {
+                        s.color_rgb = rgb;
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelStylesTransparencyChanged(idx, val) => {
+                if let Some(st) = &mut self.parcel_styles_state {
+                    if let Some(s) = st.styles.get_mut(idx) {
+                        s.transparency_pct = val;
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelStylesScaleChanged(idx, val_str) => {
+                if let Some(st) = &mut self.parcel_styles_state {
+                    if let Some(s) = st.styles.get_mut(idx) {
+                        if let Ok(v) = val_str.parse::<f64>() {
+                            s.hatch_scale = v;
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelStylesApplyAll => {
+                if let Some(st) = &self.parcel_styles_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let (updated_parcels, created_hatches) =
+                            crate::ui::window::parcel_styles::apply_thematic_styles_to_document(
+                                &mut tab.scene.document,
+                                &st.styles,
+                            );
+                        tab.scene.populate_hatches_from_document();
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                        self.command_line.push_output(&format!(
+                            "✔ Thematic styling applied: updated {} parcel(s), created {} hatch fill(s).",
+                            updated_parcels, created_hatches
+                        ));
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelStylesInsertLegend => {
+                if let Some(st) = &self.parcel_styles_state {
+                    let tab_idx = self.active_tab;
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        let parcels = crate::app::commands::civil_parcel::ParcelData::all_parcels(&tab.scene.document);
+                        let origin = if let Some(first) = parcels.first() {
+                            let mut max_x = first.bbox_max[0];
+                            let mut max_y = first.bbox_max[1];
+                            for p in &parcels {
+                                max_x = max_x.max(p.bbox_max[0]);
+                                max_y = max_y.max(p.bbox_max[1]);
+                            }
+                            [max_x + 12.0, max_y]
+                        } else {
+                            [10.0, 50.0]
+                        };
+
+                        let rows = crate::ui::window::parcel_styles::draw_parcel_zoning_legend(
+                            &mut tab.scene.document,
+                            &st.styles,
+                            origin,
+                            2.5,
+                        );
+                        tab.scene.populate_hatches_from_document();
+                        tab.scene.bump_geometry();
+                        tab.dirty = true;
+                        self.command_line.push_output(&format!(
+                            "✔ Inserted Parcel Zoning Legend ({} category rows) at ({:.1}, {:.1}).",
+                            rows, origin[0], origin[1]
+                        ));
+                    }
+                }
+                Task::none()
+            }
+            Message::ParcelStylesPickLot => {
+                let sel_key = self.parcel_styles_state.as_ref()
+                    .and_then(|st| st.styles.get(st.selected_index))
+                    .map(|s| s.key.clone())
+                    .unwrap_or_else(|| "Residential".to_string());
+                self.close_active_modal();
+                let cmd_obj = crate::app::commands::parcel_interactive::ParcelSetStyleCommand::new(sel_key);
+                self.command_line.push_info(&cmd_obj.prompt());
+                let opts = cmd_obj.options();
+                self.command_line.set_step_options(opts);
+                let i = self.active_tab;
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                Task::none()
+            }
+            Message::ParcelStylesClose => {
+                self.close_active_modal();
+                Task::none()
+            }
+            // ── Parcel Layout Tools Dialog ────────────────────────────────────────
+            Message::OpenParcelLayoutTools => {
+                if self.parcel_layout_state.is_none() {
+                    self.parcel_layout_state = Some(crate::ui::window::parcel_layout_tools::ParcelLayoutToolsState::default());
+                }
+                self.show_parcel_layout_tools = true;
+                self.active_modal = None;
+                Task::none()
+            }
+            Message::ParcelLayoutMinAreaChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_area = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMinFrontageChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_frontage = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutUseOffsetToggled(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.use_offset = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutOffsetChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.frontage_offset = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMinWidthChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_width = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMinDepthChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.min_depth = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutUseMaxDepthToggled(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.use_max_depth = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutMaxDepthChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.max_depth = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutPreferenceChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.solution_preference = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutAutoModeToggled(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.automatic_mode = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutRemainderChanged(val) => {
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.remainder_mode = val;
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutAction(action) => {
+                if action == "slide" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let criteria = if let Some(st) = &self.parcel_layout_state {
+                        crate::app::commands::parcel_interactive::ParcelSizingCriteria {
+                            min_area: st.min_area.parse::<f64>().unwrap_or(350.0),
+                            min_frontage: st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                            use_offset: st.use_offset,
+                            frontage_offset: st.frontage_offset.parse::<f64>().unwrap_or(4.0),
+                            min_width: st.min_width.parse::<f64>().unwrap_or(10.0),
+                            min_depth: st.min_depth.parse::<f64>().unwrap_or(20.0),
+                            use_max_depth: st.use_max_depth,
+                            max_depth: st.max_depth.parse::<f64>().unwrap_or(80.0),
+                            solution_preference: st.solution_preference.clone(),
+                            automatic_mode: st.automatic_mode,
+                            remainder_mode: st.remainder_mode.clone(),
+                        }
+                    } else {
+                        crate::app::commands::parcel_interactive::ParcelSizingCriteria::default()
+                    };
+                    let cmd_obj = crate::app::commands::parcel_interactive::SlideLineCommand::new_with_criteria(criteria);
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Slide Line".to_string();
+                        st.status_message = "Civil 3D Slide Line: Pick parcel boundary on canvas.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "swing" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let (min_area, min_frontage) = if let Some(st) = &self.parcel_layout_state {
+                        (
+                            st.min_area.parse::<f64>().unwrap_or(350.0),
+                            st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                        )
+                    } else {
+                        (350.0, 12.0)
+                    };
+                    let cmd_obj = crate::app::commands::parcel_interactive::SwingLineCommand::new(min_area, min_frontage);
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Swing Line".to_string();
+                        st.status_message = "Civil 3D Swing Line: Pick parcel boundary on canvas.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "renumber" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let cmd_obj = crate::app::commands::parcel_interactive::ParcelRenumberCommand::new("Lot_".to_string(), 1, 1);
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let opts = cmd_obj.options();
+                    self.command_line.set_step_options(opts);
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "renumber".to_string();
+                        st.status_message = "Civil 3D Renumber: Click parcels or press Enter for fence mode.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "swing_edit" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let (min_area, min_frontage) = if let Some(st) = &self.parcel_layout_state {
+                        (
+                            st.min_area.parse::<f64>().unwrap_or(350.0),
+                            st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                        )
+                    } else {
+                        (350.0, 12.0)
+                    };
+                    let cmd_obj = crate::app::commands::parcel_interactive::SwingLineEditCommand::new(min_area, min_frontage);
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Swing Edit".to_string();
+                        st.status_message = "Civil 3D Swing Line Edit: Select attached lot line to adjust.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "create" {
+                    return Task::done(Message::OpenCreateParcelsLayout(Some("create".to_string())));
+                } else if action == "rect" {
+                    return Task::done(Message::OpenCreateParcelsLayout(Some("rect".to_string())));
+                } else if action == "split" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let cmd_obj = crate::app::commands::parcel_interactive::ParcelSplitCommand::new();
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Split".to_string();
+                        st.status_message = "Civil 3D Split: Click start point of cutting line.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "subdivide" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let (min_area, min_frontage, remainder_mode) = if let Some(st) = &self.parcel_layout_state {
+                        (
+                            st.min_area.parse::<f64>().unwrap_or(350.0),
+                            st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                            st.remainder_mode.clone(),
+                        )
+                    } else {
+                        (350.0, 12.0, "redistribute".to_string())
+                    };
+                    let cmd_obj = crate::app::commands::parcel_interactive::ParcelSubdivideCommand::new(min_area, min_frontage, remainder_mode);
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Auto Subdiv".to_string();
+                        st.status_message = "Civil 3D Auto Subdivide: Pick parcel to subdivide.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "merge" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let cmd_obj = crate::app::commands::parcel_interactive::ParcelMergeCommand::new();
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Merge".to_string();
+                        st.status_message = "Civil 3D Merge: Pick first parcel to merge.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "setback" {
+                    self.active_modal = None;
+                    self.show_parcel_layout_tools = true;
+                    let offset = if let Some(st) = &self.parcel_layout_state {
+                        st.frontage_offset.parse::<f64>().unwrap_or(4.0)
+                    } else {
+                        4.0
+                    };
+                    let cmd_obj = crate::app::commands::parcel_interactive::ParcelSetbackCommand::new(offset);
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    let opts = cmd_obj.options();
+                    self.command_line.set_step_options(opts);
+                    let i = self.active_tab;
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st) = &mut self.parcel_layout_state {
+                        st.active_tool = "Setback".to_string();
+                        st.status_message = "Civil 3D Setback: Pick parcel to generate building envelope.".to_string();
+                    }
+                    return Task::none();
+                } else if action == "thematic" {
+                    if self.parcel_styles_state.is_none() {
+                        self.parcel_styles_state = Some(crate::ui::window::parcel_styles::ParcelStylesDialogState::default());
+                    }
+                    self.active_modal = Some(super::ModalKind::ParcelStyles);
+                    return Task::none();
+                }
+
+                let (cmd, msg) = match action.as_str() {
+                    "create" => ("PC_CREATE", "Running Create Lot by Polyline / Boundary..."),
+                    "rect" => ("PC_CREATE_RECT", "Entering Create Rectangular Lot mode..."),
+                    "slide" => ("PC_SLIDE_LINE", "Entering Interactive Slide Line lot sizing mode..."),
+                    "swing" => ("PC_SWING_LINE", "Entering Interactive Swing Line lot sizing mode..."),
+                    "swing_edit" => ("PC_SWING_LINE_EDIT", "Entering Interactive Swing Line Edit lot sizing mode..."),
+                    "split" => ("PC_SPLIT", "Entering Split Parcel by Cutting Line mode..."),
+                    "subdivide" => ("PC_SUBDIVIDE", "Executing Automatic Parcel Subdivision..."),
+                    "merge" => ("PC_MERGE", "Executing Parcel Union & Merge..."),
+                    "setback" => ("PC_SETBACK", "Setting Parcel Setback Offset..."),
+                    "thematic" => ("PC_THEMATIC", "Applying Thematic Zoning Hatching & Colors..."),
+                    _ => ("", "Action executed."),
+                };
+                if let Some(st) = &mut self.parcel_layout_state {
+                    st.active_tool = action.clone();
+                    st.status_message = msg.to_string();
+                }
+                self.command_line.push_info(msg);
+                if !cmd.is_empty() {
+                    return self.update(Message::Command(cmd.to_string()));
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutApply => {
+                if let Some(st) = &self.parcel_layout_state {
+                    self.command_line.push_output(&format!(
+                        "✔ Applied Parcel Sizing Criteria: Min Area={:.1}m², Min Frontage={:.1}m, Offset={:.1}m, Min Depth={:.1}m",
+                        st.min_area.parse::<f64>().unwrap_or(350.0),
+                        st.min_frontage.parse::<f64>().unwrap_or(12.0),
+                        st.frontage_offset.parse::<f64>().unwrap_or(4.0),
+                        st.min_depth.parse::<f64>().unwrap_or(20.0),
+                    ));
+                    self.sync_dynamic_parcels_on_change(self.active_tab, None);
+                }
+                Task::none()
+            }
+            Message::ParcelLayoutClose => {
+                self.show_parcel_layout_tools = false;
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ParcelLayoutToggleCollapse => {
+                self.parcel_layout_tools_collapsed = !self.parcel_layout_tools_collapsed;
+                Task::none()
+            }
+            Message::ParcelPaletteDragStart => {
+                self.parcel_palette_dragging = true;
+                self.parcel_palette_drag_last = None;
+                Task::none()
+            }
+            Message::ParcelPaletteDragMove(p) => {
+                if self.parcel_palette_dragging {
+                    if let Some(last) = self.parcel_palette_drag_last {
+                        let dx = p.x - last.x;
+                        let dy = p.y - last.y;
+                        let vp_w = self.vp_size.0;
+                        let vp_h = self.vp_size.1;
+                        let pal_w: f32 = if self.parcel_layout_tools_collapsed { 420.0 } else { 580.0 };
+                        let pal_h: f32 = if self.parcel_layout_tools_collapsed { 80.0 } else { 320.0 };
+                        let max_x = (vp_w - pal_w.min(vp_w - 60.0)).max(20.0);
+                        let max_y = (vp_h - pal_h.min(vp_h - 40.0)).max(20.0);
+                        self.parcel_palette_anchor.x = (self.parcel_palette_anchor.x + dx).clamp(10.0, max_x);
+                        self.parcel_palette_anchor.y = (self.parcel_palette_anchor.y + dy).clamp(10.0, max_y);
+                    }
+                    self.parcel_palette_drag_last = Some(p);
+                }
+                Task::none()
+            }
+            Message::ParcelPaletteDragEnd => {
+                self.parcel_palette_dragging = false;
+                self.parcel_palette_drag_last = None;
+                Task::none()
+            }
+            Message::ParcelPaletteMoveCorner(corner) => {
+                let vp_w = self.vp_size.0;
+                let vp_h = self.vp_size.1;
+                let pal_w = if self.parcel_layout_tools_collapsed { 420.0 } else { 580.0 };
+                let pal_h = if self.parcel_layout_tools_collapsed { 80.0 } else { 320.0 };
+                self.parcel_palette_anchor = match corner {
+                    0 => iced::Point::new(40.0, 45.0),                                                   // Top-Left (↖)
+                    1 => iced::Point::new((vp_w - pal_w - 30.0).max(40.0), 45.0),                        // Top-Right (↗)
+                    2 => iced::Point::new((vp_w - pal_w - 30.0).max(40.0), (vp_h - pal_h - 40.0).max(45.0)), // Bottom-Right (↘)
+                    3 => iced::Point::new(40.0, (vp_h - pal_h - 40.0).max(45.0)),                        // Bottom-Left (↙)
+                    _ => iced::Point::new(40.0, 45.0),
+                };
+                Task::none()
+            }
+            Message::ParcelLayoutHelp => {
+                self.command_line.push_info("Parcel Layout Tools: Interactive Civil 3D lot subdivision, parametric sizing, slide/swing line modes, setbacks, and automated layout.");
+                Task::none()
+            }
+            // ── Create Parcels - Layout Dialog ──────────────────────────
+            Message::OpenCreateParcelsLayout(target) => {
+                let mut sites = vec!["Site 1".to_string()];
+                let i = self.active_tab;
+                if let Some(tab) = self.tabs.get(i) {
+                    for ent in tab.scene.document.entities() {
+                        if let Some(rec) = ent.common().extended_data.get_record(crate::app::commands::civil_parcel::XDATA_PARCEL) {
+                            if let Some(codec::xdata::XDataValue::String(s)) = rec.values.get(1) {
+                                if !s.is_empty() && !sites.contains(s) {
+                                    sites.push(s.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                let current_site = sites.first().cloned().unwrap_or_else(|| "Site 1".to_string());
+                let mut st = self.create_parcels_layout_state.clone().unwrap_or_default();
+                st.available_sites = sites;
+                if !st.available_sites.contains(&st.site) {
+                    st.site = current_site;
+                }
+                st.target_command = target;
+                self.create_parcels_layout_state = Some(st);
+                self.active_modal = Some(crate::app::ModalKind::CreateParcelsLayout);
+                Task::none()
+            }
+            Message::CreateParcelsLayoutSiteChanged(site) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.site = site;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutNewSite => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    let next_num = st.available_sites.len() + 1;
+                    let new_name = format!("Site {}", next_num);
+                    if !st.available_sites.contains(&new_name) {
+                        st.available_sites.push(new_name.clone());
+                    }
+                    st.site = new_name;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutStyleChanged(style) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.parcel_style = style.clone();
+                    st.parcel_layer = crate::ui::window::create_parcels_layout::layer_for_style(&style).to_string();
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutLayerChanged(layer) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.parcel_layer = layer;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutSegmentLayerChanged(layer) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.parcel_segment_layer = layer;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutAreaLabelStyleChanged(style) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.area_label_style = style;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutLineLabelStyleChanged(style) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.line_label_style = style;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutCurveLabelStyleChanged(style) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.curve_label_style = style;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutAutoLabelsToggled(checked) => {
+                if let Some(st) = &mut self.create_parcels_layout_state {
+                    st.auto_add_segment_labels = checked;
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutConfirm => {
+                let Some(st) = self.create_parcels_layout_state.take() else {
+                    self.close_active_modal();
+                    return Task::none();
+                };
+                self.close_active_modal();
+
+                let target = st.target_command.as_deref().unwrap_or("objects");
+                let i = self.active_tab;
+                let next_num = if i < self.tabs.len() {
+                    crate::app::commands::civil_parcel::ParcelData::next_available_lot_number(&self.tabs[i].scene.document)
+                } else {
+                    101
+                };
+
+                if target == "rect" {
+                    self.show_parcel_layout_tools = true;
+                    let mut cmd_obj = crate::app::commands::parcel_interactive::ParcelRectCommand::new();
+                    cmd_obj.start_lot_number = next_num;
+                    cmd_obj.site_name = st.site.clone();
+                    cmd_obj.parcel_style = st.parcel_style.clone();
+                    cmd_obj.parcel_layer = st.parcel_layer.clone();
+                    cmd_obj.segment_layer = st.parcel_segment_layer.clone();
+                    cmd_obj.area_label_style = st.area_label_style.clone();
+                    cmd_obj.line_label_style = st.line_label_style.clone();
+                    cmd_obj.curve_label_style = st.curve_label_style.clone();
+                    cmd_obj.auto_add_segment_labels = st.auto_add_segment_labels;
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st_pal) = &mut self.parcel_layout_state {
+                        st_pal.active_tool = "Rect Lot".to_string();
+                        st_pal.status_message = format!("Civil 3D Rect Lot (LOT-{}): Click first corner on canvas.", next_num);
+                    }
+                } else {
+                    // "objects" or "create"
+                    self.show_parcel_layout_tools = true;
+                    let mut cmd_obj = crate::app::commands::parcel_interactive::ParcelFromObjectsCommand::new();
+                    cmd_obj.start_lot_number = next_num;
+                    cmd_obj.site_name = st.site.clone();
+                    cmd_obj.parcel_style = st.parcel_style.clone();
+                    cmd_obj.parcel_layer = st.parcel_layer.clone();
+                    cmd_obj.segment_layer = st.parcel_segment_layer.clone();
+                    cmd_obj.area_label_style = st.area_label_style.clone();
+                    cmd_obj.line_label_style = st.line_label_style.clone();
+                    cmd_obj.curve_label_style = st.curve_label_style.clone();
+                    cmd_obj.auto_add_segment_labels = st.auto_add_segment_labels;
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                    if let Some(st_pal) = &mut self.parcel_layout_state {
+                        st_pal.active_tool = "Create Lot".to_string();
+                        st_pal.status_message = format!("Civil 3D Create Lot (Starting LOT-{}): Pick closed polyline(s) on canvas.", next_num);
+                    }
+                }
+                Task::none()
+            }
+            Message::CreateParcelsLayoutHelp => {
+                self.command_line.push_info("Create Parcels - Layout: Select site, parcel style, layers, and segment label styles for parcel creation.");
+                Task::none()
+            }
+            // ── Profile View Properties Dialog ────────────────────────────────────
+            Message::OpenProfileViewProperties(preferred_id) => {
+                let tab_idx = self.active_tab;
+                if let Some(tab) = self.tabs.get(tab_idx) {
+                    let mut state = crate::ui::window::profile_view_properties::ProfileViewPropertiesState::default();
+                    if let Some(id) = preferred_id {
+                        state.view_id = id;
+                    }
+                    // Discover profile view definition in document if present
+                    for ent in tab.scene.document.entities() {
+                        if let Some(rec) = ent.common().extended_data.get_record("LANDSURVEY_PROFILE_VIEW") {
+                            let str_vals: Vec<String> = rec.values.iter().filter_map(|v| match v {
+                                codec::xdata::XDataValue::String(s) => Some(s.clone()),
+                                _ => None,
+                            }).collect();
+                            if str_vals.len() >= 4 && str_vals[2] == "VIEW_DEF" {
+                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&str_vals[3]) {
+                                    if let Some(v_id) = val.get("view_id").and_then(|v| v.as_str()) {
+                                        state.view_id = v_id.to_string();
+                                    }
+                                    if let Some(a_name) = val.get("align_name").and_then(|v| v.as_str()) {
+                                        state.align_name = a_name.to_string();
+                                    }
+                                    if let Some(v_exag) = val.get("vert_exag").and_then(|v| v.as_f64()) {
+                                        state.vert_exag = format!("{:.1}", v_exag);
+                                    }
+                                    if let Some(b_int) = val.get("band_interval").and_then(|v| v.as_f64()) {
+                                        state.band_interval = format!("{:.1}", b_int);
+                                    }
+                                    if let Some(ref_s) = val.get("ref_surface_name").and_then(|v| v.as_str()) {
+                                        state.selected_ref_surface = ref_s.to_string();
+                                    }
+                                    if let Some(d_elev) = val.get("datum_elev").and_then(|v| v.as_f64()) {
+                                        state.datum_elev = format!("{:.1}", d_elev);
+                                    }
+                                    if let Some(m_elev) = val.get("max_elev").and_then(|v| v.as_f64()) {
+                                        state.max_elev = format!("{:.1}", m_elev);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // Discover surfaces in active document
+                    for ent in tab.scene.document.entities() {
+                        if let Some(surf) = crate::app::commands::civil_surface::TinSurfaceData::from_entity(ent) {
+                            state.surfaces.push(crate::ui::window::profile_view_properties::ProfileViewSurfaceItem {
+                                name: surf.name.clone(),
+                                is_visible: true,
+                                is_ref: surf.name.eq_ignore_ascii_case("EG") || state.surfaces.is_empty(),
+                                min_z: surf.min_z,
+                                max_z: surf.max_z,
+                                layer: surf.layer.clone(),
+                            });
+                        }
+                    }
+                    if let Some(first_surf) = state.surfaces.first() {
+                        state.selected_ref_surface = state.surfaces.iter().find(|s| s.is_ref).map(|s| s.name.clone()).unwrap_or_else(|| first_surf.name.clone());
+                    }
+                    self.profile_view_properties_state = Some(state);
+                    self.show_profile_layout_tools = true;
+                    self.profile_palette_collapsed = false;
+                    self.active_modal = None; // Modeless: Never block drawing canvas!
+                    self.command_line.push_info("Profile View Floating Palette opened. Drawing remains fully interactive.");
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesTabChanged(tab) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.active_tab = tab;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesSurfaceToggled(idx, checked) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    if let Some(item) = state.surfaces.get_mut(idx) {
+                        item.is_visible = checked;
+                    }
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesRefChanged(ref_name) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.selected_ref_surface = ref_name.clone();
+                    for s in &mut state.surfaces {
+                        s.is_ref = s.name.eq_ignore_ascii_case(&ref_name);
+                    }
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesScaleChanged(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.vert_exag = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesDatumChanged(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.datum_elev = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesMaxElevChanged(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.max_elev = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesStepChanged(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.band_interval = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesToggleStationBand(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.show_station_band = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesToggleEgBand(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.show_eg_band = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesToggleFgBand(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.show_fg_band = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesToggleDiffBand(val) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.show_diff_band = val;
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesApply => {
+                if let Some(state) = &self.profile_view_properties_state {
+                    let active_surfs: Vec<&str> = state.surfaces.iter().filter(|s| s.is_visible).map(|s| s.name.as_str()).collect();
+                    let surfs_str = active_surfs.join(",");
+                    let scale = state.vert_exag.trim();
+                    let step = state.band_interval.trim();
+                    let ref_surf = state.selected_ref_surface.trim();
+                    let cmd = format!("LS_PVIEW_PROPS APPLY surfaces={} ref={} scale={} step={}", surfs_str, ref_surf, scale, step);
+                    self.command_line.push_output(&format!("✔ Applied Profile View Properties (Surfaces: {}, Ref: {}, Scale: {}x, Bands: every {}m)", if surfs_str.is_empty() { "All" } else { &surfs_str }, ref_surf, scale, step));
+                    return self.update(Message::Command(cmd));
+                }
+                Task::none()
+            }
+            Message::ProfileViewPropertiesOk => {
+                let task = if let Some(state) = &self.profile_view_properties_state {
+                    let active_surfs: Vec<&str> = state.surfaces.iter().filter(|s| s.is_visible).map(|s| s.name.as_str()).collect();
+                    let surfs_str = active_surfs.join(",");
+                    let scale = state.vert_exag.trim();
+                    let step = state.band_interval.trim();
+                    let ref_surf = state.selected_ref_surface.trim();
+                    let cmd = format!("LS_PVIEW_PROPS APPLY surfaces={} ref={} scale={} step={}", surfs_str, ref_surf, scale, step);
+                    self.command_line.push_output(&format!("✔ Profile View Properties updated successfully."));
+                    self.update(Message::Command(cmd))
+                } else {
+                    Task::none()
+                };
+                self.close_active_modal();
+                self.show_profile_layout_tools = false;
+                task
+            }
+            Message::ProfileViewPropertiesClose => {
+                self.show_profile_layout_tools = false;
+                self.close_active_modal();
+                Task::none()
+            }
+            Message::ProfileViewPropertiesDrawFg => {
+                self.close_active_modal();
+                self.show_profile_layout_tools = true;
+                self.profile_palette_collapsed = true;
+                self.command_line.push_info("Starting Interactive FG Vertical Profile Design: Click on profile view to place PVIs.");
+                self.update(Message::Command("LS_PROFILE".to_string()))
+            }
+            Message::ProfileViewPropertiesHelp => {
+                self.command_line.push_info("Profile View Properties: Parity with Civil 3D AeccProfileViewProperties. Manage sampled surface profiles, reference ground benchmark, vertical exaggeration grid scales, and profile data bands.");
+                Task::none()
+            }
+            // ── Modeless Floating Profile Palette Handlers ────────────────────────
+            Message::OpenProfileLayoutTools => {
+                if self.profile_view_properties_state.is_none() {
+                    let mut state = crate::ui::window::profile_view_properties::ProfileViewPropertiesState::default();
+                    if let Some(tab) = self.tabs.get(self.active_tab) {
+                        for ent in tab.scene.document.entities() {
+                            if let Some(surf) = crate::app::commands::civil_surface::TinSurfaceData::from_entity(ent) {
+                                state.surfaces.push(crate::ui::window::profile_view_properties::ProfileViewSurfaceItem {
+                                    name: surf.name.clone(),
+                                    is_visible: true,
+                                    is_ref: surf.name.eq_ignore_ascii_case("EG") || state.surfaces.is_empty(),
+                                    min_z: surf.min_z,
+                                    max_z: surf.max_z,
+                                    layer: surf.layer.clone(),
+                                });
+                            }
+                        }
+                    }
+                    self.profile_view_properties_state = Some(state);
+                }
+                self.show_profile_layout_tools = true;
+                self.active_modal = None; // Dismiss modal so canvas is fully interactive!
+                self.command_line.push_info("Opened Floating Profile Tools Palette. Drawing remains fully interactive.");
+                Task::none()
+            }
+            Message::ProfilePaletteClose => {
+                self.show_profile_layout_tools = false;
+                Task::none()
+            }
+            Message::ProfilePaletteToggleCollapse => {
+                self.profile_palette_collapsed = !self.profile_palette_collapsed;
+                Task::none()
+            }
+            Message::ProfilePaletteMoveCorner(corner) => {
+                let vp_w = self.vp_size.0;
+                let vp_h = self.vp_size.1;
+                let palette_w = if self.profile_palette_collapsed { 420.0 } else { 480.0 };
+                let palette_h = if self.profile_palette_collapsed { 80.0 } else { 380.0 };
+                self.profile_palette_anchor = match corner {
+                    0 => iced::Point::new(60.0, 45.0),                                                   // Top-Left (↖)
+                    1 => iced::Point::new((vp_w - palette_w - 40.0).max(60.0), 45.0),                   // Top-Right (↗)
+                    2 => iced::Point::new((vp_w - palette_w - 40.0).max(60.0), (vp_h - palette_h - 40.0).max(45.0)), // Bottom-Right (↘)
+                    3 => iced::Point::new(60.0, (vp_h - palette_h - 40.0).max(45.0)),                   // Bottom-Left (↙)
+                    _ => iced::Point::new(60.0, 45.0),
+                };
+                Task::none()
+            }
+            Message::ProfilePaletteDragStart => {
+                self.profile_palette_dragging = true;
+                self.profile_palette_drag_last = None;
+                Task::none()
+            }
+            Message::ProfilePaletteDragMove(p) => {
+                if self.profile_palette_dragging {
+                    if let Some(last) = self.profile_palette_drag_last {
+                        let dx = p.x - last.x;
+                        let dy = p.y - last.y;
+                        let vp_w = self.vp_size.0;
+                        let vp_h = self.vp_size.1;
+                        let max_x = (vp_w - 60.0).max(20.0);
+                        let max_y = (vp_h - 40.0).max(20.0);
+                        self.profile_palette_anchor.x = (self.profile_palette_anchor.x + dx).clamp(10.0, max_x);
+                        self.profile_palette_anchor.y = (self.profile_palette_anchor.y + dy).clamp(10.0, max_y);
+                    }
+                    self.profile_palette_drag_last = Some(p);
+                }
+                Task::none()
+            }
+            Message::ProfilePaletteDragEnd => {
+                self.profile_palette_dragging = false;
+                self.profile_palette_drag_last = None;
+                Task::none()
+            }
+            Message::StartProfileViewCreation => {
+                let tab = &self.tabs[self.active_tab];
+                let mut aligns = Vec::new();
+                let mut surfs = Vec::new();
+
+                for ent in tab.scene.document.entities() {
+                    if let Some(rec) = ent.common().extended_data.get_record("LANDSURVEY_ALIGNMENT") {
+                        if let Some(codec::xdata::XDataValue::String(n)) = rec.values.first() {
+                            if !aligns.contains(n) {
+                                aligns.push(n.clone());
+                            }
+                        }
+                    }
+                    if let Some(rec) = ent.common().extended_data.get_record("LANDSURVEY_SURFACE") {
+                        if let Some(codec::xdata::XDataValue::String(n)) = rec.values.first() {
+                            if !surfs.iter().any(|s: &crate::ui::window::profile_view_properties::ProfileViewSurfaceItem| s.name == *n) {
+                                surfs.push(crate::ui::window::profile_view_properties::ProfileViewSurfaceItem {
+                                    name: n.clone(),
+                                    is_visible: true,
+                                    is_ref: surfs.is_empty(),
+                                    min_z: 95.0,
+                                    max_z: 115.0,
+                                    layer: ent.common().layer.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+                if aligns.is_empty() {
+                    aligns.push("Alignment-1".to_string());
+                }
+                self.available_alignments_cache = aligns.clone();
+
+                let mut state = self.profile_view_properties_state.clone().unwrap_or_default();
+                if let Some(first_al) = aligns.first() {
+                    state.align_name = first_al.clone();
+                }
+                if !surfs.is_empty() {
+                    state.surfaces = surfs;
+                    state.selected_ref_surface = state.surfaces[0].name.clone();
+                }
+                self.profile_view_properties_state = Some(state);
+
+                self.show_profile_view_creation_dialog = true;
+                self.show_profile_layout_tools = false;
+                self.active_modal = None;
+                Task::none()
+            }
+            Message::ProfileViewCreationConfirm => {
+                self.show_profile_view_creation_dialog = false;
+                let align_name = self.profile_view_properties_state.as_ref()
+                    .map(|s| s.align_name.clone())
+                    .unwrap_or_else(|| "Alignment-1".to_string());
+                self.update(Message::Command(format!("LS_PROFILE_VIEW {}", align_name)))
+            }
+            Message::ProfileViewCreationCancel => {
+                self.show_profile_view_creation_dialog = false;
+                Task::none()
+            }
+            Message::ProfileViewCreationAlignChanged(name) => {
+                if let Some(state) = &mut self.profile_view_properties_state {
+                    state.align_name = name;
+                }
+                Task::none()
+            }
+            Message::ProfileCreationDialogDragStart => {
+                self.profile_creation_dialog_dragging = true;
+                self.profile_creation_dialog_drag_last = None;
+                Task::none()
+            }
+            Message::ProfileCreationDialogDragMove(p) => {
+                if self.profile_creation_dialog_dragging {
+                    if let Some(last) = self.profile_creation_dialog_drag_last {
+                        let dx = p.x - last.x;
+                        let dy = p.y - last.y;
+                        let vp_w = self.vp_size.0;
+                        let vp_h = self.vp_size.1;
+                        let max_x = (vp_w - 60.0).max(20.0);
+                        let max_y = (vp_h - 40.0).max(20.0);
+                        self.profile_creation_dialog_anchor.x = (self.profile_creation_dialog_anchor.x + dx).clamp(10.0, max_x);
+                        self.profile_creation_dialog_anchor.y = (self.profile_creation_dialog_anchor.y + dy).clamp(10.0, max_y);
+                    }
+                    self.profile_creation_dialog_drag_last = Some(p);
+                }
+                Task::none()
+            }
+            Message::ProfileCreationDialogDragEnd => {
+                self.profile_creation_dialog_dragging = false;
+                self.profile_creation_dialog_drag_last = None;
+                Task::none()
+            }
+            Message::GlobalCursorMoved(pos) => {
+                // 1. In-canvas Modal Dialogs (ParcelProperties, SurfaceProperties, Layers, Options, etc.)
+                if self.modal_dragging || self.modal_resizing || self.layer_col_dragging {
+                    if let Some(last) = self.modal_drag_last {
+                        let dx = pos.x - last.x;
+                        let dy = pos.y - last.y;
+                        if self.layer_col_dragging {
+                            self.layer_name_col_w = (self.layer_name_col_w + dx).clamp(60.0, 640.0);
+                        } else if self.modal_resizing {
+                            let nx = (self.modal_resize.x + dx).max(0.0);
+                            let ny = (self.modal_resize.y + dy).max(0.0);
+                            let (rx, ry) = (nx - self.modal_resize.x, ny - self.modal_resize.y);
+                            self.modal_resize.x = nx;
+                            self.modal_resize.y = ny;
+                            self.modal_offset.x += rx * 0.5;
+                            self.modal_offset.y += ry * 0.5;
+                        } else if self.modal_dragging {
+                            self.modal_offset.x += dx;
+                            self.modal_offset.y += dy;
+                            let (ww, wh) = if self.mtext_editor.is_some() {
+                                self.vp_size
+                            } else {
+                                self.win_size
+                            };
+                            let (cw, ch) = self.modal_outer_size().unwrap_or((640.0, 520.0));
+                            let max_x = ((ww - cw) * 0.5 - 20.0).max(0.0);
+                            let max_y = ((wh - ch) * 0.5 - 20.0).max(0.0);
+                            self.modal_offset.x = self.modal_offset.x.clamp(-max_x, max_x);
+                            self.modal_offset.y = self.modal_offset.y.clamp(-max_y, max_y);
+                        }
+                    }
+                    self.modal_drag_last = Some(pos);
+                }
+                // 2. Modeless Floating Parcel Layout Tools Palette
+                if self.parcel_palette_dragging {
+                    if let Some(last) = self.parcel_palette_drag_last {
+                        let dx = pos.x - last.x;
+                        let dy = pos.y - last.y;
+                        let vp_w = self.vp_size.0;
+                        let vp_h = self.vp_size.1;
+                        let pal_w: f32 = if self.parcel_layout_tools_collapsed { 420.0 } else { 580.0 };
+                        let pal_h: f32 = if self.parcel_layout_tools_collapsed { 80.0 } else { 320.0 };
+                        let max_x = (vp_w - pal_w.min(vp_w - 60.0)).max(20.0);
+                        let max_y = (vp_h - pal_h.min(vp_h - 40.0)).max(20.0);
+                        self.parcel_palette_anchor.x = (self.parcel_palette_anchor.x + dx).clamp(10.0, max_x);
+                        self.parcel_palette_anchor.y = (self.parcel_palette_anchor.y + dy).clamp(10.0, max_y);
+                    }
+                    self.parcel_palette_drag_last = Some(pos);
+                }
+                // 3. Modeless Floating Profile Layout Tools Palette
+                if self.profile_palette_dragging {
+                    if let Some(last) = self.profile_palette_drag_last {
+                        let dx = pos.x - last.x;
+                        let dy = pos.y - last.y;
+                        let vp_w = self.vp_size.0;
+                        let vp_h = self.vp_size.1;
+                        let max_x = (vp_w - 60.0).max(20.0);
+                        let max_y = (vp_h - 40.0).max(20.0);
+                        self.profile_palette_anchor.x = (self.profile_palette_anchor.x + dx).clamp(10.0, max_x);
+                        self.profile_palette_anchor.y = (self.profile_palette_anchor.y + dy).clamp(10.0, max_y);
+                    }
+                    self.profile_palette_drag_last = Some(pos);
+                }
+                // 4. Modeless Floating Profile View Creation Dialog
+                if self.profile_creation_dialog_dragging {
+                    if let Some(last) = self.profile_creation_dialog_drag_last {
+                        let dx = pos.x - last.x;
+                        let dy = pos.y - last.y;
+                        let vp_w = self.vp_size.0;
+                        let vp_h = self.vp_size.1;
+                        let max_x = (vp_w - 60.0).max(20.0);
+                        let max_y = (vp_h - 40.0).max(20.0);
+                        self.profile_creation_dialog_anchor.x = (self.profile_creation_dialog_anchor.x + dx).clamp(10.0, max_x);
+                        self.profile_creation_dialog_anchor.y = (self.profile_creation_dialog_anchor.y + dy).clamp(10.0, max_y);
+                    }
+                    self.profile_creation_dialog_drag_last = Some(pos);
+                }
+                Task::none()
+            }
+            Message::GlobalPointerReleased => {
+                self.modal_dragging = false;
+                self.modal_resizing = false;
+                self.layer_col_dragging = false;
+                self.modal_drag_last = None;
+                self.parcel_palette_dragging = false;
+                self.parcel_palette_drag_last = None;
+                self.profile_palette_dragging = false;
+                self.profile_palette_drag_last = None;
+                self.profile_creation_dialog_dragging = false;
+                self.profile_creation_dialog_drag_last = None;
+                Task::none()
+            }
             Message::AutoConstrainSelectRow(index) => {
                 if index < self.auto_constrain_settings.priority.len() {
                     self.auto_constrain_selected_row = index;

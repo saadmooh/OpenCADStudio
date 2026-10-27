@@ -37,7 +37,7 @@ mod command_driver;
 pub(crate) use command_driver::{
     copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
 };
-pub(crate) mod commands;
+pub mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
 mod dimension_preview_tests;
@@ -603,6 +603,27 @@ pub(super) struct OpenCADStudio {
     drafting_settings_state: Option<crate::ui::window::drafting_settings::DraftingSettingsState>,
     drafting_settings_saved: Option<crate::ui::window::drafting_settings::DraftingSettingsState>,
     drafting_settings_close_confirm: bool,
+    pub surface_properties_state: Option<crate::ui::window::surface_properties::SurfacePropertiesState>,
+    pub parcel_properties_state: Option<crate::ui::window::parcel_properties::ParcelPropertiesState>,
+    pub parcel_layout_state: Option<crate::ui::window::parcel_layout_tools::ParcelLayoutToolsState>,
+    pub parcel_styles_state: Option<crate::ui::window::parcel_styles::ParcelStylesDialogState>,
+    pub create_parcels_layout_state: Option<crate::ui::window::create_parcels_layout::CreateParcelsLayoutState>,
+    pub profile_view_properties_state: Option<crate::ui::window::profile_view_properties::ProfileViewPropertiesState>,
+    pub show_profile_layout_tools: bool,
+    pub profile_palette_collapsed: bool,
+    pub profile_palette_anchor: iced::Point,
+    pub profile_palette_dragging: bool,
+    pub profile_palette_drag_last: Option<iced::Point>,
+    pub show_profile_view_creation_dialog: bool,
+    pub profile_creation_dialog_anchor: iced::Point,
+    pub profile_creation_dialog_dragging: bool,
+    pub profile_creation_dialog_drag_last: Option<iced::Point>,
+    pub available_alignments_cache: Vec<String>,
+    pub show_parcel_layout_tools: bool,
+    pub parcel_layout_tools_collapsed: bool,
+    pub parcel_palette_anchor: iced::Point,
+    pub parcel_palette_dragging: bool,
+    pub parcel_palette_drag_last: Option<iced::Point>,
     scale_popup_open: bool,
     /// True while the polar-tracking angle picker is open.
     polar_popup_open: bool,
@@ -1299,6 +1320,7 @@ pub(super) struct OpenCADStudio {
     modal_dragging: bool,
     /// Layer Manager Name column width in px, adjusted by the divider drag.
     layer_name_col_w: f32,
+    layer_col_dragging: bool,
     /// How far the user has dragged the modal's corner resize grip from the
     /// dialog's natural size (added to its measured width/height). Reset
     /// with `modal_offset` so every dialog opens at its own size.
@@ -2709,6 +2731,12 @@ pub enum ModalKind {
     CountInvalidArea,
     Field,
     DraftingSettings,
+    SurfaceProperties,
+    ParcelProperties,
+    ParcelLayoutTools,
+    ParcelStyles,
+    CreateParcelsLayout,
+    ProfileViewProperties,
     AutoConstrainSettings,
     LayerStateEditor,
     Plot,
@@ -4106,6 +4134,139 @@ pub enum Message {
     DraftingSettingsClose,
     DraftingSettingsCloseDiscard,
     DraftingSettingsCloseKeep,
+    // ── Surface Properties Dialog ─────────────────────────────────────────
+    OpenSurfaceProperties(codec::Handle),
+    SurfacePropertiesTabChanged(crate::ui::window::surface_properties::SurfacePropertiesTab),
+    SurfacePropertiesNameChanged(String),
+    SurfacePropertiesDescriptionChanged(String),
+    SurfacePropertiesStyleChanged(String),
+    SurfacePropertiesMaterialChanged(String),
+    SurfacePropertiesToggleLocked,
+    SurfacePropertiesToggleTooltips,
+    SurfacePropertiesExcludeMinToggled(bool),
+    SurfacePropertiesExcludeMinChanged(String),
+    SurfacePropertiesExcludeMaxToggled(bool),
+    SurfacePropertiesExcludeMaxChanged(String),
+    SurfacePropertiesMaxTriToggled(bool),
+    SurfacePropertiesMaxTriChanged(String),
+    SurfacePropertiesApply,
+    SurfacePropertiesOk,
+    SurfacePropertiesClose,
+    SurfacePropertiesHelp,
+    SurfacePropertiesRebuild,
+    // ── Parcel Properties Dialog ──────────────────────────────────────────
+    OpenParcelProperties(codec::Handle),
+    ParcelPropertiesTabChanged(crate::ui::window::parcel_properties::ParcelPropertiesTab),
+    ParcelPropertiesNameChanged(String),
+    ParcelPropertiesNumberChanged(String),
+    ParcelPropertiesSiteChanged(String),
+    ParcelPropertiesDescriptionChanged(String),
+    ParcelPropertiesStyleChanged(String),
+    ParcelPropertiesAreaLabelStyleChanged(String),
+    ParcelPropertiesLineLabelStyleChanged(String),
+    ParcelPropertiesCurveLabelStyleChanged(String),
+    ParcelPropertiesToggleSegmentLabels(bool),
+    ParcelPropertiesSegmentLayerChanged(String),
+    ParcelPropertiesLayerChanged(String),
+    ParcelPropertiesZoningChanged(String),
+    ParcelPropertiesOwnerChanged(String),
+    ParcelPropertiesDeedChanged(String),
+    ParcelPropertiesTaxIdChanged(String),
+    ParcelPropertiesAddressChanged(String),
+    ParcelPropertiesAssessmentChanged(String),
+    ParcelPropertiesLandUseChanged(String),
+    ParcelPropertiesHatchChanged(String),
+    ParcelPropertiesToggleLocked,
+    ParcelPropertiesToggleTooltips,
+    ParcelPropertiesApply,
+    ParcelPropertiesOk,
+    ParcelPropertiesClose,
+    ParcelPropertiesHelp,
+    // ── Parcel Zoning & Thematic Styles Dialog ───────────────────
+    OpenParcelStylesDialog,
+    ParcelStylesSelectStyle(usize),
+    ParcelStylesToggleHatch(usize, bool),
+    ParcelStylesPatternChanged(usize, String),
+    ParcelStylesColorPreset(usize, [u8; 3]),
+    ParcelStylesTransparencyChanged(usize, u8),
+    ParcelStylesScaleChanged(usize, String),
+    ParcelStylesApplyAll,
+    ParcelStylesInsertLegend,
+    ParcelStylesPickLot,
+    ParcelStylesClose,
+    // ── Parcel Layout Tools Dialog ────────────────────────────────────────
+    OpenParcelLayoutTools,
+    ParcelLayoutMinAreaChanged(String),
+    ParcelLayoutMinFrontageChanged(String),
+    ParcelLayoutUseOffsetToggled(bool),
+    ParcelLayoutOffsetChanged(String),
+    ParcelLayoutMinWidthChanged(String),
+    ParcelLayoutMinDepthChanged(String),
+    ParcelLayoutUseMaxDepthToggled(bool),
+    ParcelLayoutMaxDepthChanged(String),
+    ParcelLayoutPreferenceChanged(String),
+    ParcelLayoutAutoModeToggled(bool),
+    ParcelLayoutRemainderChanged(String),
+    ParcelLayoutAction(String),
+    ParcelLayoutApply,
+    ParcelLayoutClose,
+    ParcelLayoutToggleCollapse,
+    ParcelLayoutHelp,
+    // ── Create Parcels - Layout Dialog ──────────────────────────
+    OpenCreateParcelsLayout(Option<String>),
+    CreateParcelsLayoutSiteChanged(String),
+    CreateParcelsLayoutNewSite,
+    CreateParcelsLayoutStyleChanged(String),
+    CreateParcelsLayoutLayerChanged(String),
+    CreateParcelsLayoutSegmentLayerChanged(String),
+    CreateParcelsLayoutAreaLabelStyleChanged(String),
+    CreateParcelsLayoutLineLabelStyleChanged(String),
+    CreateParcelsLayoutCurveLabelStyleChanged(String),
+    CreateParcelsLayoutAutoLabelsToggled(bool),
+    CreateParcelsLayoutConfirm,
+    CreateParcelsLayoutHelp,
+    // ── Parcel Floating Palette Drag Messages ──────────────────────────────
+    ParcelPaletteDragStart,
+    ParcelPaletteDragMove(iced::Point),
+    ParcelPaletteDragEnd,
+    ParcelPaletteMoveCorner(usize),
+    // ── Profile View Properties Dialog ────────────────────────────────────
+    OpenProfileViewProperties(Option<String>),
+    ProfileViewPropertiesTabChanged(crate::ui::window::profile_view_properties::ProfileViewPropertiesTab),
+    ProfileViewPropertiesSurfaceToggled(usize, bool),
+    ProfileViewPropertiesRefChanged(String),
+    ProfileViewPropertiesScaleChanged(String),
+    ProfileViewPropertiesDatumChanged(String),
+    ProfileViewPropertiesMaxElevChanged(String),
+    ProfileViewPropertiesStepChanged(String),
+    ProfileViewPropertiesToggleStationBand(bool),
+    ProfileViewPropertiesToggleEgBand(bool),
+    ProfileViewPropertiesToggleFgBand(bool),
+    ProfileViewPropertiesToggleDiffBand(bool),
+    ProfileViewPropertiesApply,
+    ProfileViewPropertiesOk,
+    ProfileViewPropertiesClose,
+    ProfileViewPropertiesDrawFg,
+    ProfileViewPropertiesHelp,
+    // ── Profile Floating Palette Messages ─────────────────────────────────
+    OpenProfileLayoutTools,
+    ProfilePaletteClose,
+    ProfilePaletteToggleCollapse,
+    ProfilePaletteMoveCorner(usize),
+    ProfilePaletteDragStart,
+    ProfilePaletteDragMove(iced::Point),
+    ProfilePaletteDragEnd,
+    // ── Profile View Creation Dialog Messages ─────────────────────────────
+    StartProfileViewCreation,
+    ProfileViewCreationConfirm,
+    ProfileViewCreationCancel,
+    ProfileViewCreationAlignChanged(String),
+    ProfileCreationDialogDragStart,
+    ProfileCreationDialogDragMove(iced::Point),
+    ProfileCreationDialogDragEnd,
+    // ── Universal Global Dragging Messages ────────────────────────────────
+    GlobalCursorMoved(iced::Point),
+    GlobalPointerReleased,
     /// Options window: commit the changes made so far.
     OptionsApply,
     /// Options window: commit and close.
@@ -5231,6 +5392,27 @@ impl OpenCADStudio {
             drafting_settings_state: None,
             drafting_settings_saved: None,
             drafting_settings_close_confirm: false,
+            surface_properties_state: None,
+            parcel_properties_state: None,
+            parcel_layout_state: None,
+            parcel_styles_state: Some(crate::ui::window::parcel_styles::ParcelStylesDialogState::default()),
+            create_parcels_layout_state: None,
+            profile_view_properties_state: None,
+            show_profile_layout_tools: false,
+            profile_palette_collapsed: false,
+            profile_palette_anchor: iced::Point::new(60.0, 45.0),
+            profile_palette_dragging: false,
+            profile_palette_drag_last: None,
+            show_profile_view_creation_dialog: false,
+            profile_creation_dialog_anchor: iced::Point::new(120.0, 70.0),
+            profile_creation_dialog_dragging: false,
+            profile_creation_dialog_drag_last: None,
+            available_alignments_cache: Vec::new(),
+            show_parcel_layout_tools: false,
+            parcel_layout_tools_collapsed: false,
+            parcel_palette_anchor: iced::Point::new(60.0, 45.0),
+            parcel_palette_dragging: false,
+            parcel_palette_drag_last: None,
             scale_popup_open: false,
             polar_popup_open: false,
             polar_custom_input: String::new(),
@@ -5460,7 +5642,7 @@ impl OpenCADStudio {
             property_target_override: None,
             graph_undo_open: false,
             show_external_references: false,
-            show_browser: false,
+            show_browser: true,
             pc_manager: Default::default(),
             count_palette: Default::default(),
             quick_calc: Default::default(),
@@ -5543,6 +5725,7 @@ impl OpenCADStudio {
             modal_drag_last: None,
             modal_dragging: false,
             layer_name_col_w: 130.0,
+            layer_col_dragging: false,
             modal_resize: iced::Vector::ZERO,
             modal_content_size: None,
             modal_resizing: false,
@@ -6184,6 +6367,126 @@ impl OpenCADStudio {
             ]),
         )
     }
+
+    /// Civil 3D Dynamic Reactor: Automatically syncs parcel centroid labels and table rows
+    /// whenever parcel geometry or attributes are modified.
+    pub fn sync_dynamic_parcels_on_change(
+        &mut self,
+        tab_idx: usize,
+        target_handles: Option<&[codec::Handle]>,
+    ) {
+        if tab_idx >= self.tabs.len() {
+            return;
+        }
+        let tab = &mut self.tabs[tab_idx];
+
+        // Fast-path filter: If target_handles is specified, check if any touched entity is a parcel
+        if let Some(handles) = target_handles {
+            if handles.is_empty() {
+                return;
+            }
+            let touches_parcel = handles.iter().any(|&h| {
+                if let Some(ent) = tab.scene.document.get_entity(h) {
+                    crate::app::commands::civil_parcel::is_parcel_entity(ent)
+                } else {
+                    false
+                }
+            });
+            if !touches_parcel {
+                return;
+            }
+        }
+
+        let updated = crate::app::commands::civil_parcel::ParcelData::sync_dynamic_parcels(
+            &mut tab.scene.document,
+            None,
+            None,
+        );
+        let hatches_synced = if let Some(styles_state) = &self.parcel_styles_state {
+            if styles_state.auto_apply_to_new {
+                crate::ui::window::parcel_styles::sync_parcel_hatches(
+                    &mut tab.scene.document,
+                    &styles_state.styles,
+                )
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        if updated > 0 || hatches_synced > 0 {
+            if hatches_synced > 0 {
+                tab.scene.populate_hatches_from_document();
+            }
+            tab.scene.bump_geometry();
+            tab.dirty = true;
+        }
+    }
+
+    /// Civil 3D Dynamic Reactor: Automatically syncs Profile View grid, sampled surface profiles,
+    /// and data bands whenever any sampled surface, area, or design profile is modified in the drawing.
+    pub fn sync_dynamic_profile_views_on_change(
+        &mut self,
+        tab_idx: usize,
+        target_handles: Option<&[codec::Handle]>,
+    ) {
+        if tab_idx >= self.tabs.len() {
+            return;
+        }
+        let tab = &mut self.tabs[tab_idx];
+
+        // Check if document contains any Profile View entities
+        let mut has_pview = false;
+        for ent in tab.scene.document.entities() {
+            if ent.common().extended_data.get_record("LANDSURVEY_PROFILE_VIEW").is_some() {
+                has_pview = true;
+                break;
+            }
+        }
+        if !has_pview {
+            return;
+        }
+
+        // Fast-path filter: if target_handles given, check if any is a TIN surface or alignment
+        if let Some(handles) = target_handles {
+            if handles.is_empty() {
+                return;
+            }
+            let touches_surface_or_align = handles.iter().any(|&h| {
+                if let Some(ent) = tab.scene.document.get_entity(h) {
+                    crate::app::commands::civil_surface::TinSurfaceData::from_entity(ent).is_some()
+                        || ent.common().extended_data.get_record("LANDSURVEY_ALIGN").is_some()
+                        || ent.common().extended_data.get_record("LANDSURVEY_PROFILE").is_some()
+                } else {
+                    false
+                }
+            });
+            if !touches_surface_or_align {
+                return;
+            }
+        }
+
+        if let Some(state) = &self.profile_view_properties_state {
+            let active_surfs: Vec<&str> = state.surfaces.iter().filter(|s| s.is_visible).map(|s| s.name.as_str()).collect();
+            let surfs_str = active_surfs.join(",");
+            let scale = state.vert_exag.trim();
+            let step = state.band_interval.trim();
+            let ref_surf = state.selected_ref_surface.trim();
+            let cmd = format!("LS_PVIEW_PROPS APPLY surfaces={} ref={} scale={} step={}", surfs_str, ref_surf, scale, step);
+            let _ = self.update(Message::Command(cmd));
+        }
+    }
+
+    /// Returns true if any modal dialog or floating tool palette is actively being dragged.
+    pub fn is_any_window_dragging(&self) -> bool {
+        self.modal_dragging
+            || self.modal_resizing
+            || self.layer_col_dragging
+            || self.parcel_palette_dragging
+            || self.profile_palette_dragging
+            || self.profile_creation_dialog_dragging
+    }
+
 }
 
 use std::path::PathBuf;

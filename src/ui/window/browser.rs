@@ -15,12 +15,14 @@
 //! list as if it were editable history would promise exactly that. It is a
 //! table of contents, and it is labelled as one.
 
+use crate::app::commands::civil_parcel::ParcelData;
+use crate::app::commands::civil_surface::TinSurfaceData;
 use crate::app::Message;
 use crate::ui::dock::PanelId;
 use codec::objects::SolidHistoryOperation;
 use codec::{Document, EntityType, Handle};
-use iced::widget::{button, column, container, scrollable, text};
-use iced::{Background, Element, Fill, Theme};
+use iced::widget::{button, column, container, row, scrollable, text};
+use iced::{Background, Border, Element, Fill, Theme};
 
 /// The three world planes, with the argument `CREATESKETCH` takes for each.
 const ORIGIN_PLANES: [(&str, &str); 3] = [("XY", "XY"), ("XZ", "XZ"), ("YZ", "YZ")];
@@ -63,6 +65,233 @@ fn bodies(document: &Document) -> Vec<(Handle, String)> {
         .collect()
 }
 
+/// Every Parcel in model space.
+fn parcels(document: &Document) -> Vec<ParcelData> {
+    ParcelData::all_parcels(document)
+}
+
+fn parcel_card(parcel: &ParcelData) -> Element<'static, Message> {
+    let handle_hex = format!("{:X}", parcel.handle.value());
+    let title = format!("{} [{}]", parcel.name, handle_hex);
+
+    let stats_text = format!(
+        "Area: {:.1}m² | Perim: {:.1}m | {}",
+        parcel.area_2d,
+        parcel.perimeter,
+        parcel.zoning,
+    );
+
+    let title_btn = button(
+        row![
+            text("🏷").size(11),
+            text(title).size(11.5),
+        ]
+        .spacing(4)
+        .align_y(iced::Center)
+    )
+    .on_press(Message::OpenParcelProperties(parcel.handle))
+    .width(Fill)
+    .padding([2, 4])
+    .style(button::subtle);
+
+    let btn_zoom = button(text("🔍 Zoom").size(10))
+        .on_press(Message::Command(format!("SELECT {handle_hex}")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_props = button(text("⚙ Props").size(10))
+        .on_press(Message::OpenParcelProperties(parcel.handle))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::primary);
+
+    let btn_actions = row![btn_zoom, btn_props].spacing(4).width(Fill);
+
+    container(
+        column![
+            title_btn,
+            text(stats_text).size(9.5).style(crate::ui::style::common::muted_style),
+            btn_actions,
+        ]
+        .spacing(3)
+    )
+    .padding([4, 6])
+    .width(Fill)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.weak.color)),
+        border: Border {
+            width: 1.0,
+            radius: 4.0.into(),
+            color: theme.palette().background.neutral.color,
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+/// Every TIN Surface (`PolyfaceMesh` or `Mesh`) in model space.
+fn surfaces(document: &Document) -> Vec<TinSurfaceData> {
+    document
+        .entities()
+        .filter_map(TinSurfaceData::from_entity)
+        .collect()
+}
+
+fn surface_card(surf: &TinSurfaceData) -> Element<'static, Message> {
+    let handle_hex = format!("{:X}", surf.handle.value());
+    let title = format!("{} [{}]", surf.name, handle_hex);
+
+    let stats_text = format!(
+        "Z: {:.1}..{:.1}m | Area: {:.0}m² | {} tris",
+        surf.min_z,
+        surf.max_z,
+        surf.area_2d,
+        surf.triangles.len()
+    );
+
+    let title_btn = button(
+        row![
+            text("📐").size(11),
+            text(title).size(11.5),
+        ]
+        .spacing(4)
+        .align_y(iced::Center)
+    )
+        .on_press(Message::OpenSurfaceProperties(surf.handle))
+        .width(Fill)
+        .padding([2, 4])
+        .style(button::subtle);
+
+    let btn_zoom = button(text("🔍 Zoom").size(10))
+        .on_press(Message::Command(format!("SELECT {handle_hex}")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_props = button(text("⚙ Props").size(10))
+        .on_press(Message::OpenSurfaceProperties(surf.handle))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::primary);
+
+    let btn_stats = button(text("📊 Stats").size(10))
+        .on_press(Message::Command(format!("SURFACESTATS {handle_hex}")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_xml = button(text("📤 LandXML").size(10))
+        .on_press(Message::Command(format!("SURFACELANDXML {handle_hex}")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    // Style toggles (Civil 3D Surface Styles)
+    let btn_style_tri = button(text("🔺 Triangles").size(10))
+        .on_press(Message::Command(format!("SURFACESTYLE {handle_hex} TRIANGLES")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_style_cont = button(text("〰 Contours").size(10))
+        .on_press(Message::Command(format!("SURFACESTYLE {handle_hex} CONTOURS")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_style_both = button(text("🔲 Both").size(10))
+        .on_press(Message::Command(format!("SURFACESTYLE {handle_hex} BOTH")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    // TIN Operations (Civil 3D Surface Edits)
+    let btn_swap = button(text("🔄 Swap").size(10))
+        .on_press(Message::Command(format!("SURFACESWAPEDGE {handle_hex}")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_raise = button(text("⬆ +1m").size(10))
+        .on_press(Message::Command(format!("SURFACERAISELOWER {handle_hex} 1.0")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_lower = button(text("⬇ -1m").size(10))
+        .on_press(Message::Command(format!("SURFACERAISELOWER {handle_hex} -1.0")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let btn_del = button(text("✂ Del Tri").size(10))
+        .on_press(Message::Command(format!("SURFACEDELETETRI {handle_hex}")))
+        .width(Fill)
+        .padding([3, 2])
+        .style(button::secondary);
+
+    let row1 = row![btn_zoom, btn_props, btn_stats, btn_xml].spacing(3).width(Fill);
+    let row2 = row![btn_style_tri, btn_style_cont, btn_style_both].spacing(3).width(Fill);
+    let row3 = row![btn_swap, btn_raise, btn_lower, btn_del].spacing(3).width(Fill);
+
+    let card_content = column![
+        title_btn,
+        container(
+            text(stats_text)
+                .size(10)
+                .style(crate::ui::style::common::muted_style)
+        )
+        .padding([0, 4]),
+        row1,
+        row2,
+        row3,
+    ]
+    .spacing(3);
+
+    container(card_content)
+        .width(Fill)
+        .padding([4, 6])
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.weak.color)),
+            border: Border {
+                color: theme.palette().background.neutral.color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Feature Lines / Breaklines in model space.
+fn featurelines(document: &Document) -> Vec<(Handle, String)> {
+    document
+        .entities()
+        .filter(|entity| matches!(entity, EntityType::Polyline3D(_)))
+        .map(|entity| {
+            let handle = entity.common().handle;
+            let layer = &entity.common().layer;
+            let name = if let Some(stripped) = layer.strip_prefix("LS-FEATURELINE-") {
+                stripped.to_string()
+            } else if layer.starts_with("LS-DAYLIGHT") {
+                "Daylight".to_string()
+            } else {
+                layer.clone()
+            };
+            (handle, format!("{name} [{:X}]", handle.value()))
+        })
+        .collect()
+}
+
+/// Survey Points in model space.
+fn survey_points_count(document: &Document) -> usize {
+    document
+        .entities()
+        .filter(|entity| matches!(entity, EntityType::Point(_)))
+        .count()
+}
+
 fn section_header(label: String) -> Element<'static, Message> {
     container(text(label).size(11))
         .width(Fill)
@@ -102,11 +331,160 @@ pub fn view<'a>(
     width: f32,
     chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
-    let title_bar =
-        crate::ui::dock::title_bar(PanelId::Browser, crate::t!("Browser").into_owned(), chrome);
+    let title_bar = crate::ui::dock::title_bar(
+        PanelId::Browser,
+        "Prospector (Toolspace)".to_string(),
+        chrome,
+    );
 
     let mut tree = column![].spacing(1);
 
+    // ── Prospector: Civil 3D Surfaces & Feature Lines ──────────────────
+    let surfs = surfaces(document);
+    tree = tree.push(section_header(format!("Prospector - Surfaces ({})", surfs.len())));
+
+    let create_surf_btn = button(
+        row![
+            text("➕").size(11),
+            text("Create Surface from Points").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::Command("SURFACECREATE Ground".to_string()))
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::secondary);
+
+    tree = tree.push(container(create_surf_btn).padding([2, 4]));
+
+    if surfs.is_empty() {
+        tree = tree.push(note_row("No surfaces in drawing".to_string()));
+    } else {
+        if surfs.len() >= 2 {
+            let volume_btn = button(
+                row![
+                    text("⚖").size(12),
+                    text("Calculate Cut / Fill Volume").size(11),
+                ]
+                .spacing(5)
+            )
+            .on_press(Message::Command("SURFACEVOLUME".to_string()))
+            .width(Fill)
+            .padding([5, 8])
+            .style(button::primary);
+
+            tree = tree.push(container(volume_btn).padding([2, 4]));
+        }
+
+        for surf in &surfs {
+            tree = tree.push(surface_card(surf));
+        }
+    }
+
+    // ── Civil 3D Parcels / Sites ──────────────────────────────────────────
+    let prcls = parcels(document);
+    tree = tree.push(section_header(format!("Civil 3D Parcels ({})", prcls.len())));
+
+    let layout_tools_btn = button(
+        row![
+            text("📐").size(11),
+            text("Parcel Layout Tools (Civil 3D)").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::OpenParcelLayoutTools)
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::primary);
+
+    tree = tree.push(container(layout_tools_btn).padding([2, 4]));
+
+    if prcls.is_empty() {
+        tree = tree.push(note_row("No parcels in drawing".to_string()));
+    } else {
+        for p in &prcls {
+            tree = tree.push(parcel_card(p));
+        }
+    }
+
+    // ── Civil 3D Road Profile Views ───────────────────────────────────────
+    tree = tree.push(section_header("Civil 3D Road Profiles & Views".to_string()));
+
+    let pview_tools_btn = button(
+        row![
+            text("📐").size(11),
+            text("Profile Layout Tools (Floating)").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::OpenProfileLayoutTools)
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::primary);
+
+    let pview_props_btn = button(
+        row![
+            text("⚙").size(11),
+            text("Profile View Properties (Full)").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::OpenProfileViewProperties(None))
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::secondary);
+
+    let pview_create_btn = button(
+        row![
+            text("⊞").size(11),
+            text("Create Profile View Grid").size(11),
+        ]
+        .spacing(5)
+    )
+    .on_press(Message::StartProfileViewCreation)
+    .width(Fill)
+    .padding([4, 8])
+    .style(button::secondary);
+
+    tree = tree.push(container(column![pview_tools_btn, pview_props_btn, pview_create_btn].spacing(3)).padding([2, 4]));
+
+    let fls = featurelines(document);
+    if !fls.is_empty() {
+        tree = tree.push(section_header(format!("Feature Lines ({})", fls.len())));
+        for (handle, label) in fls {
+            tree = tree.push(entry_row(label, format!("SELECT {:X}", handle.value())));
+        }
+    }
+
+    let pts = survey_points_count(document);
+    if pts > 0 {
+        tree = tree.push(section_header(format!("Survey Points ({pts})")));
+        let pts_tri_btn = button(
+            row![
+                text("📐").size(11),
+                text("Triangulate Survey Points -> TIN").size(11),
+            ]
+            .spacing(5)
+        )
+        .on_press(Message::Command("SURFACECREATE Survey_TIN".to_string()))
+        .width(Fill)
+        .padding([4, 8])
+        .style(button::secondary);
+        tree = tree.push(container(pts_tri_btn).padding([2, 4]));
+    }
+
+    // ── Modeling & Solid Bodies (Secondary) ───────────────────────────────
+    let bodies = bodies(document);
+    if !bodies.is_empty() {
+        tree = tree.push(section_header(
+            crate::tf!("Bodies ({})", bodies.len()).into_owned(),
+        ));
+        for (handle, label) in bodies {
+            tree = tree.push(entry_row(label, format!("SELECT {:X}", handle.value())));
+        }
+    }
+
+    // ── Origin Planes & Sketch ────────────────────────────────────────────
     tree = tree.push(section_header(crate::t!("Origin planes").into_owned()));
     for (label, argument) in ORIGIN_PLANES {
         tree = tree.push(entry_row(
@@ -115,28 +493,9 @@ pub fn view<'a>(
         ));
     }
 
-    tree = tree.push(section_header(crate::t!("Sketch").into_owned()));
-    match open_sketch {
-        Some(name) => {
-            tree = tree.push(entry_row(name.to_string(), "FINISHSKETCH".to_string()));
-        }
-        None => {
-            tree = tree.push(note_row(crate::t!("No sketch open").into_owned()));
-        }
-    }
-
-    let bodies = bodies(document);
-    tree = tree.push(section_header(
-        crate::tf!("Bodies ({})", bodies.len()).into_owned(),
-    ));
-    if bodies.is_empty() {
-        tree = tree.push(note_row(crate::t!("No solids yet").into_owned()));
-    } else {
-        for (handle, label) in bodies {
-            // Selecting by handle is what SELECT already takes, so clicking a
-            // row reuses the ordinary selection path.
-            tree = tree.push(entry_row(label, format!("SELECT {:X}", handle.value())));
-        }
+    if let Some(name) = open_sketch {
+        tree = tree.push(section_header(crate::t!("Sketch").into_owned()));
+        tree = tree.push(entry_row(name.to_string(), "FINISHSKETCH".to_string()));
     }
 
     let body = scrollable(container(tree).padding(iced::Padding {

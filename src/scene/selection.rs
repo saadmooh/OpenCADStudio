@@ -112,6 +112,12 @@ impl Scene {
         handles: &[Handle],
     ) -> Vec<Handle> {
         let mut expanded = self.expanded_with_leaders(handles);
+        // Expand parcel labels to their underlying parcel polyline
+        let parcels: Vec<Handle> = expanded
+            .iter()
+            .filter_map(|h| crate::app::commands::civil_parcel::ParcelData::resolve_parcel_from_label(&self.document, *h))
+            .collect();
+        expanded.extend(parcels);
         // A viewport's clip boundary goes with its viewport: picking the
         // boundary selects both, erasing it erases the viewport.
         let viewports: Vec<Handle> = expanded
