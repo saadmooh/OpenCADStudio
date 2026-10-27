@@ -44,3 +44,7 @@ __pycache__/
 
 # macOS Finder metadata
 .DS_Store
+
+# Local plugins and scratch workspaces
+plugins/
+scratch/
