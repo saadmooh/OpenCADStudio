@@ -942,17 +942,17 @@ impl ParcelData {
         None
     }
 
-    /// Computes the safe interior width and height for text placement
-    /// inside the parcel polygon around its centroid.
-    pub fn interior_clearance(&self) -> (f64, f64) {
+    /// Computes the safe interior width, height, and optimal visual center [x, y]
+    /// for text placement inside the parcel polygon.
+    pub fn interior_clearance_and_center(&self) -> (f64, f64, f64, f64) {
         let cx = self.centroid[0];
         let cy = self.centroid[1];
         let n = self.vertices.len();
-        let bbox_w = (self.bbox_max[0] - self.bbox_min[0]).max(0.1);
-        let bbox_h = (self.bbox_max[1] - self.bbox_min[1]).max(0.1);
+        let bbox_w = (self.bbox_max[0] - self.bbox_min[0]).max(1.0);
+        let bbox_h = (self.bbox_max[1] - self.bbox_min[1]).max(1.0);
 
         if n < 3 {
-            return ((bbox_w * 0.85).max(0.2), (bbox_h * 0.85).max(0.2));
+            return (bbox_w * 0.85, bbox_h * 0.85, cx, cy);
         }
 
         // Horizontal ray intersection with polygon edges at y = cy
@@ -997,29 +997,36 @@ impl ParcelData {
             }
         }
 
-        // Compute symmetric centered clearance around centroid to prevent centered text
-        // from poking out one side when the centroid is closer to one edge.
-        let w_sym = if x_left.is_finite() && x_right.is_finite() && x_right > x_left + 1e-3 {
-            let left_dist = (cx - x_left).max(0.0);
-            let right_dist = (x_right - cx).max(0.0);
-            (left_dist.min(right_dist) * 2.0).min(x_right - x_left)
+        let (w_avail, center_x) = if x_left.is_finite() && x_right.is_finite() && x_right > x_left + 1e-3 {
+            let actual_w = (x_right - x_left).min(bbox_w);
+            let mid_x = (x_left + x_right) * 0.5;
+            // Shift smoothly towards the visual midpoint so the text uses the full width
+            let target_cx = (cx * 0.3 + mid_x * 0.7).clamp(x_left + actual_w * 0.1, x_right - actual_w * 0.1);
+            (actual_w, target_cx)
         } else {
-            bbox_w
+            (bbox_w, cx)
         };
 
-        let h_sym = if y_bottom.is_finite() && y_top.is_finite() && y_top > y_bottom + 1e-3 {
-            let bot_dist = (cy - y_bottom).max(0.0);
-            let top_dist = (y_top - cy).max(0.0);
-            (bot_dist.min(top_dist) * 2.0).min(y_top - y_bottom)
+        let (h_avail, center_y) = if y_bottom.is_finite() && y_top.is_finite() && y_top > y_bottom + 1e-3 {
+            let actual_h = (y_top - y_bottom).min(bbox_h);
+            let mid_y = (y_bottom + y_top) * 0.5;
+            let target_cy = (cy * 0.3 + mid_y * 0.7).clamp(y_bottom + actual_h * 0.1, y_top - actual_h * 0.1);
+            (actual_h, target_cy)
         } else {
-            bbox_h
+            (bbox_h, cy)
         };
 
-        let w_avail = w_sym.min(bbox_w);
-        let h_avail = h_sym.min(bbox_h);
+        let safe_w = (w_avail * 0.85).max(1.0);
+        let safe_h = (h_avail * 0.85).max(1.0);
 
-        // Safe margin: 85% of interior clearance width, 85% of height
-        ((w_avail * 0.85).max(0.2), (h_avail * 0.85).max(0.2))
+        (safe_w, safe_h, center_x, center_y)
+    }
+
+    /// Computes the safe interior width and height for text placement
+    /// inside the parcel polygon around its centroid.
+    pub fn interior_clearance(&self) -> (f64, f64) {
+        let (w, h, _, _) = self.interior_clearance_and_center();
+        (w, h)
     }
 
     /// Checks whether a 2D point [x, y] lies inside the parcel polygon.
@@ -1543,7 +1550,7 @@ impl ParcelData {
                 })
                 .collect();
 
-            let (safe_w, safe_h) = parcel.interior_clearance();
+            let (safe_w, safe_h, cx, cy) = parcel.interior_clearance_and_center();
             let scale_ratio = Self::drawing_scale_ratio(doc);
             let base_paper_h = if doc.header.text_height > 1e-6 {
                 doc.header.text_height
@@ -1551,43 +1558,49 @@ impl ParcelData {
                 2.2
             };
 
-            // Dynamic text height calculation proportional to parcel size:
-            // Sizing adapts to each parcel individually based on its area and interior dimensions.
+            // Standard CAD text height:
+            let default_cad_h = if (scale_ratio - 1.0).abs() > 1e-4 {
+                (base_paper_h * (scale_ratio / 1000.0)).clamp(0.40, 12.0)
+            } else {
+                base_paper_h.clamp(1.6, 2.5) // Standard 1.8m - 2.2m for model space
+            };
+
+            // Adaptive sizing based on parcel area:
+            // Standard and large lots (>= 400 m²) keep their normal readable CAD height.
+            // Small lots scale down gracefully without becoming unreadable.
             let parcel_area = parcel.area_2d.max(1.0);
-            let char_dim = parcel_area.sqrt().min(safe_w.max(safe_h));
-            let mut parcel_target_h = (0.065 * char_dim).clamp(0.35, 3.5);
+            let area_target_h = if parcel_area >= 600.0 {
+                (default_cad_h * (1.0 + (parcel_area / 12000.0).min(0.5))).clamp(default_cad_h, 3.5)
+            } else if parcel_area >= 200.0 {
+                (default_cad_h * (parcel_area / 500.0).sqrt()).clamp(1.2, default_cad_h)
+            } else {
+                (0.085 * parcel_area.sqrt()).clamp(0.45, default_cad_h)
+            };
 
-            // If drawing scale is active (e.g. 1:500, 1:200), factor in drawing scale:
-            if (scale_ratio - 1.0).abs() > 1e-4 {
-                let paper_h_world = (base_paper_h * (scale_ratio / 1000.0)).clamp(0.20, 12.0);
-                parcel_target_h = parcel_target_h.min(paper_h_world * 1.5).max(paper_h_world * 0.4);
-            }
-
-            let mut text_h = parcel_target_h;
-
-            let cx = parcel.centroid[0];
-            let cy = parcel.centroid[1];
+            let mut text_h = area_target_h;
 
             let char_w = text_h * 0.65;
-            let area_raw = format!(
-                "{:.1} m² ({:.3} ac)",
-                parcel.area_2d,
-                parcel.area_2d * 0.000247105
-            );
-            let perim_raw = format!("P: {:.2} m", parcel.perimeter);
 
-            // In compact parcels (tight clearance), shorten area string so it fits legibly
-            let area_str = if safe_w < text_h * 18.0 || parcel_area < 250.0 {
-                format!("{:.1} m²", parcel.area_2d)
+            // Sizing check for the area string:
+            // If the lot is narrow, show "{:.1} m²" (8 chars) instead of adding "(0.xxx ac)" (20 chars)
+            // so we don't unnecessarily crush the text height to fit "(0.xxx ac)"!
+            let include_acres = safe_w >= text_h * 16.0 && parcel_area >= 250.0;
+            let area_str = if include_acres {
+                format!(
+                    "{:.1} m² ({:.3} ac)",
+                    parcel.area_2d,
+                    parcel.area_2d * 0.000247105
+                )
             } else {
-                area_raw
+                format!("{:.1} m²", parcel.area_2d)
             };
+            let perim_raw = format!("P: {:.2} m", parcel.perimeter);
 
             let style_norm = parcel.area_label_style.trim().to_ascii_lowercase();
             let raw_lines: Vec<(String, f64, &'static str)> = if style_norm.contains("name only") {
                 vec![(parcel.name.clone(), 1.0, "name")]
             } else if style_norm.contains("area only") {
-                vec![(area_str.clone(), 0.9, "area")]
+                vec![(area_str.clone(), 0.95, "area")]
             } else if style_norm.contains("square meters") || style_norm.contains("acres") {
                 vec![
                     (format!("{:.1} m²", parcel.area_2d), 0.95, "area"),
@@ -1596,20 +1609,20 @@ impl ParcelData {
             } else if style_norm == "parcel name & area" || (style_norm.contains("name") && style_norm.contains("area") && !style_norm.contains("perim")) {
                 vec![
                     (parcel.name.clone(), 1.0, "name"),
-                    (area_str.clone(), 0.9, "area"),
+                    (area_str.clone(), 0.95, "area"),
                 ]
             } else {
                 // "Parcel Name, Area & Perimeter" (default)
-                // If safe_h is too tight for 3 lines at minimum readable height, drop perimeter
-                if safe_h < 1.8 && safe_w < 10.0 {
+                // If safe_h is too tight for 3 lines, drop perimeter so name & area stay legible
+                if safe_h < text_h * 3.5 || safe_w < 8.0 {
                     vec![
                         (parcel.name.clone(), 1.0, "name"),
-                        (area_str.clone(), 0.9, "area"),
+                        (area_str.clone(), 0.95, "area"),
                     ]
                 } else {
                     vec![
                         (parcel.name.clone(), 1.0, "name"),
-                        (area_str.clone(), 0.9, "area"),
+                        (area_str.clone(), 0.95, "area"),
                         (perim_raw.clone(), 0.85, "perim"),
                     ]
                 }
@@ -1627,26 +1640,24 @@ impl ParcelData {
                 .collect();
 
             // Strict boundary containment:
+            // 1) Width limit: longest wrapped line must fit within safe_w
             let max_line_chars = line_info
                 .iter()
                 .flat_map(|(wrapped, _, _, _)| wrapped.lines().map(|l| l.chars().count()))
                 .max()
-                .unwrap_or(10)
+                .unwrap_or(8)
                 .max(1);
-
-            let total_line_rows: usize = line_info
-                .iter()
-                .map(|(wrapped, _, _, _)| wrapped.lines().count().max(1))
-                .sum();
-
-            // 1) Width limit: max_line_chars * (0.68 * text_h) <= safe_w
-            let max_h_for_width = (safe_w / (max_line_chars as f64 * 0.68)).max(0.15);
+            let max_h_for_width = (safe_w / (max_line_chars as f64 * 0.68)).max(0.30);
             if text_h > max_h_for_width {
                 text_h = max_h_for_width;
             }
 
-            // 2) Height limit: total_line_rows * (1.35 * text_h) <= safe_h
-            let max_h_for_height = (safe_h / (total_line_rows as f64 * 1.35)).max(0.15);
+            // 2) Height limit: total stacked rows must fit within safe_h
+            let total_line_rows: usize = line_info
+                .iter()
+                .map(|(wrapped, _, _, _)| wrapped.lines().count().max(1))
+                .sum();
+            let max_h_for_height = (safe_h / (total_line_rows as f64 * 1.35)).max(0.30);
             if text_h > max_h_for_height {
                 text_h = max_h_for_height;
             }
