@@ -948,11 +948,11 @@ impl ParcelData {
         let cx = self.centroid[0];
         let cy = self.centroid[1];
         let n = self.vertices.len();
-        let bbox_w = (self.bbox_max[0] - self.bbox_min[0]).max(2.0);
-        let bbox_h = (self.bbox_max[1] - self.bbox_min[1]).max(2.0);
+        let bbox_w = (self.bbox_max[0] - self.bbox_min[0]).max(0.1);
+        let bbox_h = (self.bbox_max[1] - self.bbox_min[1]).max(0.1);
 
         if n < 3 {
-            return ((bbox_w * 0.78).max(2.0), (bbox_h * 0.75).max(2.0));
+            return ((bbox_w * 0.85).max(0.2), (bbox_h * 0.85).max(0.2));
         }
 
         // Horizontal ray intersection with polygon edges at y = cy
@@ -997,23 +997,29 @@ impl ParcelData {
             }
         }
 
-        let w_ray = if x_left.is_finite() && x_right.is_finite() && x_right > x_left + 1e-3 {
-            x_right - x_left
+        // Compute symmetric centered clearance around centroid to prevent centered text
+        // from poking out one side when the centroid is closer to one edge.
+        let w_sym = if x_left.is_finite() && x_right.is_finite() && x_right > x_left + 1e-3 {
+            let left_dist = (cx - x_left).max(0.0);
+            let right_dist = (x_right - cx).max(0.0);
+            (left_dist.min(right_dist) * 2.0).min(x_right - x_left)
         } else {
             bbox_w
         };
 
-        let h_ray = if y_bottom.is_finite() && y_top.is_finite() && y_top > y_bottom + 1e-3 {
-            y_top - y_bottom
+        let h_sym = if y_bottom.is_finite() && y_top.is_finite() && y_top > y_bottom + 1e-3 {
+            let bot_dist = (cy - y_bottom).max(0.0);
+            let top_dist = (y_top - cy).max(0.0);
+            (bot_dist.min(top_dist) * 2.0).min(y_top - y_bottom)
         } else {
             bbox_h
         };
 
-        let w_avail = w_ray.min(bbox_w);
-        let h_avail = h_ray.min(bbox_h);
+        let w_avail = w_sym.min(bbox_w);
+        let h_avail = h_sym.min(bbox_h);
 
-        // Safe margin: 78% of interior clearance width, 75% of height
-        ((w_avail * 0.78).max(2.0), (h_avail * 0.75).max(2.0))
+        // Safe margin: 85% of interior clearance width, 85% of height
+        ((w_avail * 0.85).max(0.2), (h_avail * 0.85).max(0.2))
     }
 
     /// Checks whether a 2D point [x, y] lies inside the parcel polygon.
@@ -1102,7 +1108,7 @@ pub fn quadrant_bearing(dx: f64, dy: f64) -> String {
 
 /// Helper to wrap text into multiple lines at word boundaries before exceeding safe_width.
 pub fn smart_wrap_text(text: &str, safe_width: f64, char_width: f64) -> String {
-    let max_chars = ((safe_width / char_width.max(0.05)).floor() as usize).max(6);
+    let max_chars = ((safe_width / char_width.max(0.05)).floor() as usize).max(1);
     if text.chars().count() <= max_chars {
         return text.to_string();
     }
@@ -1545,25 +1551,19 @@ impl ParcelData {
                 2.2
             };
 
-            // Scale text dynamically with drawing scale:
-            // Standard paper text height (2.2mm) in drawing meters:
-            // 1:1000 -> 2.2m, 1:500 -> 1.1m, 1:200 -> 0.44m, 1:100 -> 0.22m.
-            // If scale_ratio is 1.0 (unspecified / 1:1 model space), use base_paper_h directly.
-            let mut text_h = if (scale_ratio - 1.0).abs() > 1e-4 {
-                (base_paper_h * (scale_ratio / 1000.0)).clamp(0.25, 12.0)
-            } else {
-                base_paper_h
-            };
+            // Dynamic text height calculation proportional to parcel size:
+            // Sizing adapts to each parcel individually based on its area and interior dimensions.
+            let parcel_area = parcel.area_2d.max(1.0);
+            let char_dim = parcel_area.sqrt().min(safe_w.max(safe_h));
+            let mut parcel_target_h = (0.065 * char_dim).clamp(0.35, 3.5);
 
-            // Enforce boundary containment:
-            let max_h_for_parcel = (safe_h / 3.4).max(0.25);
-            if text_h > max_h_for_parcel {
-                text_h = max_h_for_parcel;
+            // If drawing scale is active (e.g. 1:500, 1:200), factor in drawing scale:
+            if (scale_ratio - 1.0).abs() > 1e-4 {
+                let paper_h_world = (base_paper_h * (scale_ratio / 1000.0)).clamp(0.20, 12.0);
+                parcel_target_h = parcel_target_h.min(paper_h_world * 1.5).max(paper_h_world * 0.4);
             }
-            let max_h_for_width = (safe_w / 6.0).max(0.25);
-            if text_h > max_h_for_width {
-                text_h = max_h_for_width;
-            }
+
+            let mut text_h = parcel_target_h;
 
             let cx = parcel.centroid[0];
             let cy = parcel.centroid[1];
@@ -1576,11 +1576,18 @@ impl ParcelData {
             );
             let perim_raw = format!("P: {:.2} m", parcel.perimeter);
 
+            // In compact parcels (tight clearance), shorten area string so it fits legibly
+            let area_str = if safe_w < text_h * 18.0 || parcel_area < 250.0 {
+                format!("{:.1} m²", parcel.area_2d)
+            } else {
+                area_raw
+            };
+
             let style_norm = parcel.area_label_style.trim().to_ascii_lowercase();
             let raw_lines: Vec<(String, f64, &'static str)> = if style_norm.contains("name only") {
                 vec![(parcel.name.clone(), 1.0, "name")]
             } else if style_norm.contains("area only") {
-                vec![(area_raw.clone(), 0.9, "area")]
+                vec![(area_str.clone(), 0.9, "area")]
             } else if style_norm.contains("square meters") || style_norm.contains("acres") {
                 vec![
                     (format!("{:.1} m²", parcel.area_2d), 0.95, "area"),
@@ -1589,18 +1596,26 @@ impl ParcelData {
             } else if style_norm == "parcel name & area" || (style_norm.contains("name") && style_norm.contains("area") && !style_norm.contains("perim")) {
                 vec![
                     (parcel.name.clone(), 1.0, "name"),
-                    (area_raw.clone(), 0.9, "area"),
+                    (area_str.clone(), 0.9, "area"),
                 ]
             } else {
                 // "Parcel Name, Area & Perimeter" (default)
-                vec![
-                    (parcel.name.clone(), 1.0, "name"),
-                    (area_raw.clone(), 0.9, "area"),
-                    (perim_raw.clone(), 0.85, "perim"),
-                ]
+                // If safe_h is too tight for 3 lines at minimum readable height, drop perimeter
+                if safe_h < 1.8 && safe_w < 10.0 {
+                    vec![
+                        (parcel.name.clone(), 1.0, "name"),
+                        (area_str.clone(), 0.9, "area"),
+                    ]
+                } else {
+                    vec![
+                        (parcel.name.clone(), 1.0, "name"),
+                        (area_str.clone(), 0.9, "area"),
+                        (perim_raw.clone(), 0.85, "perim"),
+                    ]
+                }
             };
 
-            let line_info: Vec<(String, f64, f64, &'static str)> = raw_lines
+            let mut line_info: Vec<(String, f64, f64, &'static str)> = raw_lines
                 .into_iter()
                 .map(|(raw, scale, kind)| {
                     let wrapped = smart_wrap_text(&raw, safe_w, char_w);
@@ -1611,14 +1626,37 @@ impl ParcelData {
                 })
                 .collect();
 
+            // Strict boundary containment:
+            let max_line_chars = line_info
+                .iter()
+                .flat_map(|(wrapped, _, _, _)| wrapped.lines().map(|l| l.chars().count()))
+                .max()
+                .unwrap_or(10)
+                .max(1);
+
+            let total_line_rows: usize = line_info
+                .iter()
+                .map(|(wrapped, _, _, _)| wrapped.lines().count().max(1))
+                .sum();
+
+            // 1) Width limit: max_line_chars * (0.68 * text_h) <= safe_w
+            let max_h_for_width = (safe_w / (max_line_chars as f64 * 0.68)).max(0.15);
+            if text_h > max_h_for_width {
+                text_h = max_h_for_width;
+            }
+
+            // 2) Height limit: total_line_rows * (1.35 * text_h) <= safe_h
+            let max_h_for_height = (safe_h / (total_line_rows as f64 * 1.35)).max(0.15);
+            if text_h > max_h_for_height {
+                text_h = max_h_for_height;
+            }
+
             let count = line_info.len();
             let gap = text_h * 0.35;
-            let total_lines_h: f64 = line_info.iter().map(|(_, _, h, _)| *h).sum();
-            let total_needed_h = total_lines_h + (count.saturating_sub(1) as f64) * gap;
-
-            if total_needed_h > safe_h && total_needed_h > 1e-4 {
-                let scale_down = (safe_h / total_needed_h).clamp(0.2, 1.0);
-                text_h = (text_h * scale_down).max(0.2);
+            for item in &mut line_info {
+                let n_sub = item.0.split('\n').count().max(1);
+                let line_pitch = (text_h * item.1) * 1.3;
+                item.2 = (n_sub as f64) * line_pitch;
             }
 
             let mut line_positions: Vec<Vector3> = Vec::new();
@@ -1827,7 +1865,10 @@ impl ParcelData {
                         (mid_x, mid_y, false, chord_len, 0.0, 0.0)
                     };
 
-                    let offset_dist = (text_h * 0.65).clamp(0.25, 4.0);
+                    let mut seg_text_h = (0.065 * chord_len).clamp(0.25, (text_h * 0.75).max(0.35));
+                    let is_short_seg = chord_len < seg_text_h * 9.0;
+
+                    let offset_dist = (seg_text_h * 0.70).clamp(0.20, 3.0);
                     let test_pt = [arc_mid_x + nx * offset_dist, arc_mid_y + ny * offset_dist];
                     let (out_nx, out_ny) = if parcel.contains_point(test_pt) {
                         (-nx, -ny)
@@ -1853,6 +1894,8 @@ impl ParcelData {
                             format!("L={:.2}m", curve_len)
                         } else if curve_style_norm.contains("radius only") {
                             format!("R={:.2}m", radius)
+                        } else if is_short_seg {
+                            format!("L={:.2}m", curve_len)
                         } else {
                             format!("L={:.2}m\nR={:.2}m", curve_len, radius)
                         }
@@ -1862,14 +1905,23 @@ impl ParcelData {
                             format!("{:.2}m", chord_len)
                         } else if line_style_norm.contains("bearing only") {
                             bearing
+                        } else if is_short_seg {
+                            format!("{:.2}m", chord_len)
                         } else {
                             format!("{}\n{:.2}m", bearing, chord_len)
                         }
                     };
 
+                    // Constrain seg_text_h so text length does not exceed segment length
+                    let max_seg_chars = label_text.lines().map(|l| l.chars().count()).max().unwrap_or(6).max(1);
+                    let max_h_for_seg = (chord_len * 0.85) / (max_seg_chars as f64 * 0.68);
+                    if seg_text_h > max_h_for_seg {
+                        seg_text_h = max_h_for_seg.max(0.15);
+                    }
+
                     let mut m = MText::new();
                     m.value = label_text.clone();
-                    m.height = text_h * 0.72;
+                    m.height = seg_text_h;
                     m.attachment_point = AttachmentPoint::MiddleCenter;
                     m.rotation = rot;
                     m.insertion_point = Vector3::new(insert_x, insert_y, 0.0);
@@ -2328,6 +2380,103 @@ mod tests {
             scaled_labels[0].height,
             labels[0].height
         );
+    }
+
+    #[test]
+    fn test_dynamic_parcel_text_sizing_per_parcel_proportions() {
+        let mut doc = CadDocument::new();
+
+        // 1. Small parcel: 10m x 8m (Area = 80 m²)
+        let small_poly = LwPolyline::from_points(vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(10.0, 0.0),
+            Vector2::new(10.0, 8.0),
+            Vector2::new(0.0, 8.0),
+        ]);
+        let mut ent_small = EntityType::LwPolyline(small_poly);
+        ent_small.common_mut().layer = "PC-PARCEL".to_string();
+        let mut rec_s = ExtendedDataRecord::new(XDATA_PARCEL);
+        rec_s.add_value(XDataValue::String("Small Lot 1".to_string()));
+        rec_s.add_value(XDataValue::String("Site 1".to_string()));
+        rec_s.add_value(XDataValue::String("1".to_string()));
+        ent_small.common_mut().extended_data.add_record(rec_s);
+        let _h_small = doc.add_entity(ent_small).unwrap();
+
+        // 2. Large parcel: 60m x 50m (Area = 3000 m²)
+        let large_poly = LwPolyline::from_points(vec![
+            Vector2::new(50.0, 0.0),
+            Vector2::new(110.0, 0.0),
+            Vector2::new(110.0, 50.0),
+            Vector2::new(50.0, 50.0),
+        ]);
+        let mut ent_large = EntityType::LwPolyline(large_poly);
+        ent_large.common_mut().layer = "PC-PARCEL".to_string();
+        let mut rec_l = ExtendedDataRecord::new(XDATA_PARCEL);
+        rec_l.add_value(XDataValue::String("Large Lot 2".to_string()));
+        rec_l.add_value(XDataValue::String("Site 1".to_string()));
+        rec_l.add_value(XDataValue::String("2".to_string()));
+        ent_large.common_mut().extended_data.add_record(rec_l);
+        let _h_large = doc.add_entity(ent_large).unwrap();
+
+        // 3. Sync parcels to generate dynamic labels
+        let updated = ParcelData::sync_dynamic_parcels(&mut doc, None, None);
+        assert!(updated >= 2);
+
+        // 4. Collect labels for both parcels
+        let mut small_labels = Vec::new();
+        let mut large_labels = Vec::new();
+
+        for ent in doc.entities() {
+            if ent.common().layer == "PC-PARCEL-LABEL" {
+                if let EntityType::MText(m) = ent {
+                    let tag = ent.common().extended_data.get_record("OPENCAD_PARCEL_LABEL")
+                        .and_then(|r| r.values.first())
+                        .and_then(|v| match v {
+                            codec::xdata::XDataValue::String(s) => Some(s.clone()),
+                            _ => None,
+                        });
+                    if tag.as_deref() == Some("Small Lot 1") {
+                        small_labels.push((**m).clone());
+                    } else if tag.as_deref() == Some("Large Lot 2") {
+                        large_labels.push((**m).clone());
+                    }
+                }
+            }
+        }
+
+        assert!(!small_labels.is_empty(), "Small lot labels must exist");
+        assert!(!large_labels.is_empty(), "Large lot labels must exist");
+
+        let small_h = small_labels[0].height;
+        let large_h = large_labels[0].height;
+
+        // Dynamic text size is calculated based on parcel size:
+        // Text in the smaller parcel must be smaller than text in the larger parcel!
+        assert!(
+            small_h < large_h,
+            "Small parcel text height ({}) must be smaller than large parcel text height ({})",
+            small_h,
+            large_h
+        );
+
+        // Check boundary containment: small parcel text must strictly fit within its 10m x 8m bounds
+        for m in &small_labels {
+            assert!(
+                m.insertion_point.x >= 0.0 && m.insertion_point.x <= 10.0,
+                "Small parcel label insertion X must be inside [0, 10]"
+            );
+            assert!(
+                m.insertion_point.y >= 0.0 && m.insertion_point.y <= 8.0,
+                "Small parcel label insertion Y must be inside [0, 8]"
+            );
+            let approx_line_w = m.value.lines().map(|l| l.chars().count()).max().unwrap_or(1) as f64 * m.height * 0.68;
+            assert!(
+                approx_line_w <= 10.0 * 0.85,
+                "Small parcel label line width ({}) must not exceed safe parcel width ({})",
+                approx_line_w,
+                10.0 * 0.85
+            );
+        }
     }
 }
 
