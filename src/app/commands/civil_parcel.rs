@@ -1310,13 +1310,6 @@ impl ParcelData {
         target_handle: Option<Handle>,
         old_name: Option<&str>,
     ) -> usize {
-        // 0. Enforce site topology: resolve any overlaps within the same Site
-        if let Some(th) = target_handle {
-            Self::resolve_site_topology_overlaps(doc, Some(th));
-        } else {
-            Self::resolve_all_site_overlaps(doc);
-        }
-
         // 0. Clean up accidental XDATA on explicit non-parcel entities (such as PC-SETBACK or label entities)
         for ent in doc.entities_mut() {
             let layer = ent.common().layer.clone();
@@ -2488,6 +2481,85 @@ mod tests {
                 10.0 * 0.85
             );
         }
+    }
+
+    #[test]
+    fn test_renumber_and_dynamic_sync_preserves_all_parcel_boundaries() {
+        let mut doc = CadDocument::new();
+
+        // 1. Create two adjacent parcels sharing a boundary at x = 20.0
+        let poly1 = LwPolyline::from_points(vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(20.0, 0.0),
+            Vector2::new(20.0, 30.0),
+            Vector2::new(0.0, 30.0),
+        ]);
+        let mut ent1 = EntityType::LwPolyline(poly1);
+        ent1.common_mut().layer = "PC-PARCEL".to_string();
+        let mut rec1 = codec::xdata::ExtendedDataRecord::new(XDATA_PARCEL);
+        rec1.add_value(codec::xdata::XDataValue::String("Lot 1".to_string()));
+        rec1.add_value(codec::xdata::XDataValue::String("Site 1".to_string()));
+        rec1.add_value(codec::xdata::XDataValue::String("1".to_string()));
+        ent1.common_mut().extended_data.add_record(rec1);
+        let h1 = doc.add_entity(ent1).unwrap();
+
+        let poly2 = LwPolyline::from_points(vec![
+            Vector2::new(20.0, 0.0),
+            Vector2::new(45.0, 0.0),
+            Vector2::new(45.0, 30.0),
+            Vector2::new(20.0, 30.0),
+        ]);
+        let mut ent2 = EntityType::LwPolyline(poly2);
+        ent2.common_mut().layer = "PC-PARCEL".to_string();
+        let mut rec2 = codec::xdata::ExtendedDataRecord::new(XDATA_PARCEL);
+        rec2.add_value(codec::xdata::XDataValue::String("Lot 2".to_string()));
+        rec2.add_value(codec::xdata::XDataValue::String("Site 1".to_string()));
+        rec2.add_value(codec::xdata::XDataValue::String("2".to_string()));
+        ent2.common_mut().extended_data.add_record(rec2);
+        let h2 = doc.add_entity(ent2).unwrap();
+
+        // Initial sync
+        ParcelData::sync_dynamic_parcels(&mut doc, None, None);
+
+        // Verify both boundaries exist
+        assert!(doc.get_entity(h1).is_some(), "Lot 1 polyline boundary must exist after initial sync");
+        assert!(doc.get_entity(h2).is_some(), "Lot 2 polyline boundary must exist after initial sync");
+
+        // 2. Renumber parcels (e.g. Lot 1 -> Villa-101, Lot 2 -> Villa-102)
+        if let Some(ent) = doc.get_entity_mut(h1) {
+            let mut rec = codec::xdata::ExtendedDataRecord::new(XDATA_PARCEL);
+            rec.add_value(codec::xdata::XDataValue::String("Villa-101".to_string()));
+            rec.add_value(codec::xdata::XDataValue::String("Site 1".to_string()));
+            rec.add_value(codec::xdata::XDataValue::String("101".to_string()));
+            ent.common_mut().extended_data.clear();
+            ent.common_mut().extended_data.add_record(rec);
+        }
+        if let Some(ent) = doc.get_entity_mut(h2) {
+            let mut rec = codec::xdata::ExtendedDataRecord::new(XDATA_PARCEL);
+            rec.add_value(codec::xdata::XDataValue::String("Villa-102".to_string()));
+            rec.add_value(codec::xdata::XDataValue::String("Site 1".to_string()));
+            rec.add_value(codec::xdata::XDataValue::String("102".to_string()));
+            ent.common_mut().extended_data.clear();
+            ent.common_mut().extended_data.add_record(rec);
+        }
+
+        // Global sync as triggered during renumbering
+        ParcelData::sync_dynamic_parcels(&mut doc, None, None);
+
+        // 3. STRICT ASSERTION: Neither polyline boundary may be deleted or modified!
+        assert!(doc.get_entity(h1).is_some(), "Lot 1 (Villa-101) polyline boundary must NEVER be deleted during renumbering");
+        assert!(doc.get_entity(h2).is_some(), "Lot 2 (Villa-102) polyline boundary must NEVER be deleted during renumbering");
+
+        let poly1_after = match doc.get_entity(h1).unwrap() {
+            EntityType::LwPolyline(lw) => lw,
+            _ => panic!("Expected LwPolyline for Lot 1"),
+        };
+        let poly2_after = match doc.get_entity(h2).unwrap() {
+            EntityType::LwPolyline(lw) => lw,
+            _ => panic!("Expected LwPolyline for Lot 2"),
+        };
+        assert_eq!(poly1_after.vertices.len(), 4, "Lot 1 polyline vertices count must remain intact");
+        assert_eq!(poly2_after.vertices.len(), 4, "Lot 2 polyline vertices count must remain intact");
     }
 }
 
