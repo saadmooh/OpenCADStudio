@@ -141,7 +141,6 @@ impl OpenCADStudio {
                 .push_info(crate::t!("Catchment tagged successfully.").as_ref());
         }
         self.refresh_properties();
-        self.sync_dynamic_parcels_on_change(i, None);
         None
     }
 

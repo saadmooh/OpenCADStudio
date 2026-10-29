@@ -2548,18 +2548,6 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
-            // Modeless floating Civil 3D Parcel Layout Tools toolbar/palette
-            if !tab.is_start && self.show_parcel_layout_tools {
-                if let Some(state) = &self.parcel_layout_state {
-                    viewport_stack = viewport_stack.push(position_canvas_overlay(
-                        self.parcel_palette_anchor,
-                        crate::ui::window::parcel_layout_tools::view_floating_palette(
-                            state,
-                            self.parcel_layout_tools_collapsed,
-                        ),
-                    ));
-                }
-            }
 
             // Modeless floating Civil 3D Profile View Creation Dialog (appears before placement)
             if !tab.is_start && self.show_profile_view_creation_dialog {

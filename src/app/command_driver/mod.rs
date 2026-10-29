@@ -787,7 +787,6 @@ impl OpenCADStudio {
                     self.tabs[i]
                         .scene
                         .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
-                    self.sync_dynamic_parcels_on_change(i, Some(&[handle]));
                     self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;
                     let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());

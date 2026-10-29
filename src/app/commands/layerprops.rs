@@ -719,28 +719,7 @@ impl OpenCADStudio {
                         .push_output("Prospector / Toolspace panel closed.");
                 }
             }
-            "PARCELRESOLVEOVERLAPS" | "RESOLVEPARCELS" | "PARCELTOPOLOGY" => {
-                let tab_idx = self.active_tab;
-                let count = crate::app::commands::civil_parcel::ParcelData::resolve_all_site_overlaps(
-                    &mut self.tabs[tab_idx].scene.document,
-                );
-                crate::app::commands::civil_parcel::ParcelData::sync_dynamic_parcels(
-                    &mut self.tabs[tab_idx].scene.document,
-                    None,
-                    None,
-                );
-                self.tabs[tab_idx].scene.populate_hatches_from_document();
-                self.tabs[tab_idx].scene.bump_geometry();
-                self.tabs[tab_idx].dirty = true;
-                if count > 0 {
-                    self.command_line.push_output(&format!(
-                        "✔ Successfully resolved {} overlapping parcel boundary(ies) within the same Site.",
-                        count
-                    ));
-                } else {
-                    self.command_line.push_output("✔ All parcels within each Site have non-overlapping topology.");
-                }
-            }
+
             "FINISHSKETCH" => {
                 self.finish_sketch(i);
             }

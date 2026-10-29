@@ -15,7 +15,6 @@
 //! list as if it were editable history would promise exactly that. It is a
 //! table of contents, and it is labelled as one.
 
-use crate::app::commands::civil_parcel::ParcelData;
 use crate::app::commands::civil_surface::TinSurfaceData;
 use crate::app::Message;
 use crate::ui::dock::PanelId;
@@ -63,71 +62,6 @@ fn bodies(document: &Document) -> Vec<(Handle, String)> {
             (handle, format!("{label} {:X}", handle.value()))
         })
         .collect()
-}
-
-/// Every Parcel in model space.
-fn parcels(document: &Document) -> Vec<ParcelData> {
-    ParcelData::all_parcels(document)
-}
-
-fn parcel_card(parcel: &ParcelData) -> Element<'static, Message> {
-    let handle_hex = format!("{:X}", parcel.handle.value());
-    let title = format!("{} [{}]", parcel.name, handle_hex);
-
-    let stats_text = format!(
-        "Area: {:.1}m² | Perim: {:.1}m | {}",
-        parcel.area_2d,
-        parcel.perimeter,
-        parcel.zoning,
-    );
-
-    let title_btn = button(
-        row![
-            text("🏷").size(11),
-            text(title).size(11.5),
-        ]
-        .spacing(4)
-        .align_y(iced::Center)
-    )
-    .on_press(Message::OpenParcelProperties(parcel.handle))
-    .width(Fill)
-    .padding([2, 4])
-    .style(button::subtle);
-
-    let btn_zoom = button(text("🔍 Zoom").size(10))
-        .on_press(Message::Command(format!("SELECT {handle_hex}")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_props = button(text("⚙ Props").size(10))
-        .on_press(Message::OpenParcelProperties(parcel.handle))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::primary);
-
-    let btn_actions = row![btn_zoom, btn_props].spacing(4).width(Fill);
-
-    container(
-        column![
-            title_btn,
-            text(stats_text).size(9.5).style(crate::ui::style::common::muted_style),
-            btn_actions,
-        ]
-        .spacing(3)
-    )
-    .padding([4, 6])
-    .width(Fill)
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.weak.color)),
-        border: Border {
-            width: 1.0,
-            radius: 4.0.into(),
-            color: theme.palette().background.neutral.color,
-        },
-        ..Default::default()
-    })
-    .into()
 }
 
 /// Every TIN Surface (`PolyfaceMesh` or `Mesh`) in model space.
@@ -378,32 +312,6 @@ pub fn view<'a>(
 
         for surf in &surfs {
             tree = tree.push(surface_card(surf));
-        }
-    }
-
-    // ── Civil 3D Parcels / Sites ──────────────────────────────────────────
-    let prcls = parcels(document);
-    tree = tree.push(section_header(format!("Civil 3D Parcels ({})", prcls.len())));
-
-    let layout_tools_btn = button(
-        row![
-            text("📐").size(11),
-            text("Parcel Layout Tools (Civil 3D)").size(11),
-        ]
-        .spacing(5)
-    )
-    .on_press(Message::OpenParcelLayoutTools)
-    .width(Fill)
-    .padding([4, 8])
-    .style(button::primary);
-
-    tree = tree.push(container(layout_tools_btn).padding([2, 4]));
-
-    if prcls.is_empty() {
-        tree = tree.push(note_row("No parcels in drawing".to_string()));
-    } else {
-        for p in &prcls {
-            tree = tree.push(parcel_card(p));
         }
     }
 

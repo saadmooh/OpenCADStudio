@@ -157,7 +157,6 @@ impl OpenCADStudio {
         self.tabs[i].edit_revision = self.tabs[i].edit_revision.wrapping_add(1);
         self.clear_redo_history(i);
         self.trim_history(i);
-        self.sync_dynamic_parcels_on_change(i, None);
     }
 
     pub(super) fn push_object_visibility_history(
@@ -1447,7 +1446,6 @@ impl OpenCADStudio {
             native_graph_changed,
             &changes,
         );
-        self.sync_dynamic_parcels_on_change(i, None);
         if report {
             self.command_line
                 .push_output(crate::tf!("Undo: {last_label}").as_ref());
@@ -1518,7 +1516,6 @@ impl OpenCADStudio {
             native_graph_changed,
             &changes,
         );
-        self.sync_dynamic_parcels_on_change(i, None);
         self.command_line
             .push_output(crate::tf!("Redo: {last_label}").as_ref());
     }
