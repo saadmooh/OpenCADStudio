@@ -694,7 +694,7 @@ pub fn translate_open_infra_term(source: &str) -> Option<String> {
             Language::FrFr => "Infos point".to_string(),
             _ => "Point Info".to_string(),
         }),
-        "Coordinaten" | "Coordinates" => Some(match lang {
+        "Coördinaten" | "Coordinaten" | "Coordinates" => Some(match lang {
             Language::ArSa => "نظام الإحداثيات".to_string(),
             Language::FrFr => "Coordonnées".to_string(),
             _ => "Coordinates".to_string(),
@@ -721,65 +721,80 @@ pub fn translate_open_infra_term(source: &str) -> Option<String> {
             Language::FrFr => "OpenStreetMap (OSM)".to_string(),
             _ => "OpenStreetMap".to_string(),
         }),
+        "OpenStreetMap-kaart (wereld)" => Some(match lang {
+            Language::ArSa => "خريطة الشوارع OpenStreetMap (عالمي)".to_string(),
+            Language::FrFr => "Carte OpenStreetMap (Monde)".to_string(),
+            _ => "OpenStreetMap Map (Global)".to_string(),
+        }),
+        "OpenStreetMap-vectoren" => Some(match lang {
+            Language::ArSa => "متجهات OpenStreetMap".to_string(),
+            Language::FrFr => "Vecteurs OpenStreetMap".to_string(),
+            _ => "OpenStreetMap Vectors".to_string(),
+        }),
         "PDOK (NL)" | "PDOK" => Some(match lang {
             Language::ArSa => "خوادم PDOK (هولندا)".to_string(),
             Language::FrFr => "Serveurs PDOK (NL)".to_string(),
             _ => "PDOK (NL)".to_string(),
         }),
-        "Luchtfoto" | "Aerial Photo" => Some(match lang {
-            Language::ArSa => "صورة جوية".to_string(),
-            Language::FrFr => "Photo aérienne".to_string(),
-            _ => "Aerial Photo".to_string(),
+        "Luchtfoto" | "Aerial Photo" | "Luchtfoto (PDOK)" => Some(match lang {
+            Language::ArSa => "صورة جوية (PDOK)".to_string(),
+            Language::FrFr => "Photo aérienne (PDOK)".to_string(),
+            _ => "Aerial Photo (PDOK)".to_string(),
         }),
-        "Satelliet" | "Satellite" => Some(match lang {
-            Language::ArSa => "قمر صناعي".to_string(),
-            Language::FrFr => "Satellite".to_string(),
-            _ => "Satellite".to_string(),
+        "Satelliet" | "Satellite" | "Sentinel-2 satelliet (wereld)" => Some(match lang {
+            Language::ArSa => "قمر صناعي Sentinel-2 (عالمي)".to_string(),
+            Language::FrFr => "Satellite Sentinel-2 (Monde)".to_string(),
+            _ => "Sentinel-2 Satellite (Global)".to_string(),
         }),
-        "AHN" | "Elevation Model (AHN)" => Some(match lang {
-            Language::ArSa => "نموذج الارتفاعات (AHN)".to_string(),
-            Language::FrFr => "Modèle d'élévation (AHN)".to_string(),
-            _ => "Elevation Model (AHN)".to_string(),
+        "AHN" | "Elevation Model (AHN)" | "AHN hoogtekaart (PDOK)" => Some(match lang {
+            Language::ArSa => "نموذج الارتفاعات AHN (هولندا)".to_string(),
+            Language::FrFr => "Modèle d'élévation AHN (PDOK)".to_string(),
+            _ => "Elevation Model AHN (PDOK)".to_string(),
         }),
         "WFS" | "WFS Features" => Some(match lang {
             Language::ArSa => "معالم متجهة (WFS)".to_string(),
             Language::FrFr => "Service d'entités WFS".to_string(),
             _ => "WFS Features".to_string(),
         }),
+        "BGT · BRK · KLIC" | "BGT . BRK . KLIC" | "BGT - BRK - KLIC" => Some(match lang {
+            Language::ArSa => "طبقات BGT · السجل · المرافق".to_string(),
+            Language::FrFr => "BGT · Cadastre · Réseaux".to_string(),
+            _ => "BGT · Cadastre · Utilities".to_string(),
+        }),
         "BGT" | "BGT Topography" => Some(match lang {
             Language::ArSa => "طبوغرافيا BGT".to_string(),
             Language::FrFr => "Topographie BGT".to_string(),
             _ => "BGT Topography".to_string(),
         }),
-        "Kadaster" | "Cadastre" => Some(match lang {
-            Language::ArSa => "السجل العقاري".to_string(),
-            Language::FrFr => "Cadastre".to_string(),
-            _ => "Cadastre".to_string(),
+        "Kadaster" | "Cadastre" | "Kadastrale kaart (PDOK)" => Some(match lang {
+            Language::ArSa => "السجل العقاري (PDOK)".to_string(),
+            Language::FrFr => "Carte cadastrale (PDOK)".to_string(),
+            _ => "Cadastral Map (PDOK)".to_string(),
         }),
-        "Percelen" => Some(match lang {
-            Language::ArSa => "القطع العقارية".to_string(),
-            Language::FrFr => "Parcelles".to_string(),
-            _ => "Parcels".to_string(),
+        "Percelen" | "Kadastrale percelen (PDOK)" => Some(match lang {
+            Language::ArSa => "القطع العقارية (PDOK)".to_string(),
+            Language::FrFr => "Parcelles cadastrales (PDOK)".to_string(),
+            _ => "Cadastral Parcels (PDOK)".to_string(),
         }),
-        "BAG" | "Buildings & Addresses" => Some(match lang {
-            Language::ArSa => "سجل المباني والعناوين (BAG)".to_string(),
-            Language::FrFr => "Bâtiments & Adresses (BAG)".to_string(),
-            _ => "Buildings & Addresses (BAG)".to_string(),
+        "BAG" | "Buildings & Addresses" | "BAG panden (PDOK)" => Some(match lang {
+            Language::ArSa => "سجل المباني والعناوين BAG (هولندا)".to_string(),
+            Language::FrFr => "Bâtiments & Adresses BAG (PDOK)".to_string(),
+            _ => "Buildings & Addresses BAG (PDOK)".to_string(),
         }),
-        "NWB" | "Road Network" => Some(match lang {
-            Language::ArSa => "شبكة الطرق الوطنية (NWB)".to_string(),
-            Language::FrFr => "Réseau routier (NWB)".to_string(),
-            _ => "Road Network (NWB)".to_string(),
+        "NWB" | "Road Network" | "NWB wegvakken (RWS)" => Some(match lang {
+            Language::ArSa => "شبكة الطرق الوطنية NWB (هولندا)".to_string(),
+            Language::FrFr => "Réseau routier NWB (RWS)".to_string(),
+            _ => "Road Network NWB (RWS)".to_string(),
         }),
-        "Hectometer" | "Hectometer Points" => Some(match lang {
-            Language::ArSa => "نقاط الهكتومتر".to_string(),
-            Language::FrFr => "Bornes hectométriques".to_string(),
-            _ => "Hectometer Points".to_string(),
+        "Hectometer" | "Hectometer Points" | "NWB hectometerpunten (RWS)" => Some(match lang {
+            Language::ArSa => "نقاط الهكتومتر NWB (هولندا)".to_string(),
+            Language::FrFr => "Bornes hectométriques NWB (RWS)".to_string(),
+            _ => "Hectometer Points NWB (RWS)".to_string(),
         }),
-        "Spoor" | "Railway Tracks" => Some(match lang {
-            Language::ArSa => "خطوط السكك الحديدية".to_string(),
-            Language::FrFr => "Voies ferrées".to_string(),
-            _ => "Railway Tracks".to_string(),
+        "Spoor" | "Railway Tracks" | "Spoorassen (ProRail)" => Some(match lang {
+            Language::ArSa => "خطوط السكك الحديدية (ProRail)".to_string(),
+            Language::FrFr => "Voies ferrées (ProRail)".to_string(),
+            _ => "Railway Tracks (ProRail)".to_string(),
         }),
         "KLIC" | "Utilities & Cables" => Some(match lang {
             Language::ArSa => "شبكات المرافق والكابلات (KLIC)".to_string(),
@@ -1337,7 +1352,10 @@ mod tests {
         assert_eq!(translate("Kaartbeeld"), "صورة الخريطة");
         assert_eq!(translate("Vectordata"), "البيانات المتجهة");
         assert_eq!(translate("OpenStreetMap"), "خرائط الشوارع (OSM)");
-        assert_eq!(translate("Kadaster"), "السجل العقاري");
+        assert_eq!(translate("Coördinaten"), "نظام الإحداثيات");
+        assert_eq!(translate("BGT · BRK · KLIC"), "طبقات BGT · السجل · المرافق");
+        assert_eq!(translate("Luchtfoto (PDOK)"), "صورة جوية (PDOK)");
+        assert_eq!(translate("Kadaster"), "السجل العقاري (PDOK)");
         assert_eq!(translate("KLIC"), "شبكات المرافق والكابلات (KLIC)");
         assert_eq!(
             ribbon_module_title("openaec.open-infra", "Open Infra - GIS"),

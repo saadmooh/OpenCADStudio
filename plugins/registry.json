@@ -20,6 +20,11 @@
     "description": "Full stormwater hydrology and hydraulics — mirrors HydroComplete for Civil 3D (HC_ANALYZE, HC_REVIEW, KaTeX HTML reports, Atlas 14, BMP/WQV, LandXML)."
   },
   {
+    "repo": "saadmooh/opencad-parcels",
+    "name": "OpenCivil Parcels",
+    "description": "Civil 3D-grade Parcel Management: Planar Topology, Sites, Slide & Swing Line Subdivision, ANSI31 Hatching, Dynamic Labels, Mapcheck Analysis, and LandXML."
+  },
+  {
     "repo": "KevinGriffin-new/opencad-landsurvey-plugin",
     "name": "Land Survey",
     "description": "Survey points, PNEZD & LandXML import, TIN surfaces, earthwork volumes, COGO, and coordinate transforms (RTS / Helmert / resection)."
