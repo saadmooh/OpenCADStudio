@@ -84,9 +84,6 @@ impl ExternalPlugin {
 
     /// Returns whether the package's dependency fingerprint matches the host.
     pub fn acadrust_compatible(&self) -> bool {
-        if cfg!(debug_assertions) {
-            return true;
-        }
         acadrust_source_compatible(
             self.api_version,
             self.acadrust_declared,
@@ -96,9 +93,6 @@ impl ExternalPlugin {
 
     /// Returns whether the package's rustc matches the host.
     pub fn rustc_compatible(&self) -> bool {
-        if cfg!(debug_assertions) {
-            return true;
-        }
         if !ocs_plugin_api::version_info::uses_acadrust_gate(self.api_version) {
             return true;
         }
@@ -126,9 +120,6 @@ pub(crate) fn acadrust_source_compatible(
     declared: bool,
     source: Option<&str>,
 ) -> bool {
-    if cfg!(debug_assertions) {
-        return true;
-    }
     !ocs_plugin_api::version_info::uses_acadrust_gate(api_version)
         || declared
             && source.is_some_and(|source| {
