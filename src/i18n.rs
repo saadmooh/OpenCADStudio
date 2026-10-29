@@ -647,6 +647,227 @@ fn translate_parcels_term(source: &str) -> Option<String> {
     }
 }
 
+pub fn translate_open_infra_term(source: &str) -> Option<String> {
+    let lang = active_language();
+    match source {
+        // Tab & Plugin Names
+        "Open Infra — GIS" | "Open Infra - GIS" | "Open Infra" => Some(match lang {
+            Language::ArSa => "البنية التحتية — نظم المعلومات الجغرافية".to_string(),
+            Language::FrFr => "Open Infra — SIG".to_string(),
+            _ => "Open Infra — GIS".to_string(),
+        }),
+        "GIS-workbench en NLCS-basisdata voor infra en civiele techniek: projectlocatie, WMS/WFS-servers, OpenStreetMap, BGT, kadaster en KLIC conform NLCS. Nederland (PDOK) en wereldwijd."
+        | "GIS workbench and NLCS base data for infrastructure and civil engineering: project location, WMS/WFS servers, OpenStreetMap, BGT, cadastre, and utilities." => Some(match lang {
+            Language::ArSa => "منصة نظم المعلومات الجغرافية (GIS) والبيانات الأساسية للبنية التحتية: تحديد موقع المشروع، خوادم WMS/WFS، خرائط OpenStreetMap، طبقات BGT، السجل العقاري، وشبكات المرافق.".to_string(),
+            Language::FrFr => "Atelier SIG et données de base pour l'infrastructure : géolocalisation de projet, serveurs WMS/WFS, OpenStreetMap, BGT, cadastre et réseaux souterrains.".to_string(),
+            _ => "GIS workbench and NLCS base data for infrastructure and civil engineering: project location, WMS/WFS servers, OpenStreetMap, BGT, cadastre, and utilities.".to_string(),
+        }),
+
+        // Ribbon Groups
+        "Geo-locatie" | "Geo Location" => Some(match lang {
+            Language::ArSa => "الموقع الجغرافي".to_string(),
+            Language::FrFr => "Géo-localisation".to_string(),
+            _ => "Geo Location".to_string(),
+        }),
+        "Kaartbeeld" | "Map View" => Some(match lang {
+            Language::ArSa => "صورة الخريطة".to_string(),
+            Language::FrFr => "Image cartographique".to_string(),
+            _ => "Map View".to_string(),
+        }),
+        "Vectordata" | "Vector Data" => Some(match lang {
+            Language::ArSa => "البيانات المتجهة".to_string(),
+            Language::FrFr => "Données vectorielles".to_string(),
+            _ => "Vector Data".to_string(),
+        }),
+        "Tekenblad" | "Drawing Sheet" => Some(match lang {
+            Language::ArSa => "لوحة الرسم".to_string(),
+            Language::FrFr => "Feuille de dessin".to_string(),
+            _ => "Drawing Sheet".to_string(),
+        }),
+        "Gebied" | "Region / Area" | "Area" => Some(match lang {
+            Language::ArSa => "نطاق المنطقة".to_string(),
+            Language::FrFr => "Zone / Région".to_string(),
+            _ => "Region / Area".to_string(),
+        }),
+        "Punt info" | "Point Info" | "Point info" => Some(match lang {
+            Language::ArSa => "معلومات النقطة".to_string(),
+            Language::FrFr => "Infos point".to_string(),
+            _ => "Point Info".to_string(),
+        }),
+        "Coordinaten" | "Coordinates" => Some(match lang {
+            Language::ArSa => "نظام الإحداثيات".to_string(),
+            Language::FrFr => "Coordonnées".to_string(),
+            _ => "Coordinates".to_string(),
+        }),
+        "Servers" | "Map Servers" => Some(match lang {
+            Language::ArSa => "خوادم الخرائط".to_string(),
+            Language::FrFr => "Serveurs de cartes".to_string(),
+            _ => "Map Servers".to_string(),
+        }),
+
+        // Tools & Dropdowns
+        "Locatie" | "Location" => Some(match lang {
+            Language::ArSa => "تحديد الموقع".to_string(),
+            Language::FrFr => "Emplacement".to_string(),
+            _ => "Location".to_string(),
+        }),
+        "WMS / TMS" | "WMS/TMS" => Some(match lang {
+            Language::ArSa => "خرائط WMS / TMS".to_string(),
+            Language::FrFr => "Cartes WMS / TMS".to_string(),
+            _ => "WMS / TMS".to_string(),
+        }),
+        "OpenStreetMap" | "OSM" => Some(match lang {
+            Language::ArSa => "خرائط الشوارع (OSM)".to_string(),
+            Language::FrFr => "OpenStreetMap (OSM)".to_string(),
+            _ => "OpenStreetMap".to_string(),
+        }),
+        "PDOK (NL)" | "PDOK" => Some(match lang {
+            Language::ArSa => "خوادم PDOK (هولندا)".to_string(),
+            Language::FrFr => "Serveurs PDOK (NL)".to_string(),
+            _ => "PDOK (NL)".to_string(),
+        }),
+        "Luchtfoto" | "Aerial Photo" => Some(match lang {
+            Language::ArSa => "صورة جوية".to_string(),
+            Language::FrFr => "Photo aérienne".to_string(),
+            _ => "Aerial Photo".to_string(),
+        }),
+        "Satelliet" | "Satellite" => Some(match lang {
+            Language::ArSa => "قمر صناعي".to_string(),
+            Language::FrFr => "Satellite".to_string(),
+            _ => "Satellite".to_string(),
+        }),
+        "AHN" | "Elevation Model (AHN)" => Some(match lang {
+            Language::ArSa => "نموذج الارتفاعات (AHN)".to_string(),
+            Language::FrFr => "Modèle d'élévation (AHN)".to_string(),
+            _ => "Elevation Model (AHN)".to_string(),
+        }),
+        "WFS" | "WFS Features" => Some(match lang {
+            Language::ArSa => "معالم متجهة (WFS)".to_string(),
+            Language::FrFr => "Service d'entités WFS".to_string(),
+            _ => "WFS Features".to_string(),
+        }),
+        "BGT" | "BGT Topography" => Some(match lang {
+            Language::ArSa => "طبوغرافيا BGT".to_string(),
+            Language::FrFr => "Topographie BGT".to_string(),
+            _ => "BGT Topography".to_string(),
+        }),
+        "Kadaster" | "Cadastre" => Some(match lang {
+            Language::ArSa => "السجل العقاري".to_string(),
+            Language::FrFr => "Cadastre".to_string(),
+            _ => "Cadastre".to_string(),
+        }),
+        "Percelen" => Some(match lang {
+            Language::ArSa => "القطع العقارية".to_string(),
+            Language::FrFr => "Parcelles".to_string(),
+            _ => "Parcels".to_string(),
+        }),
+        "BAG" | "Buildings & Addresses" => Some(match lang {
+            Language::ArSa => "سجل المباني والعناوين (BAG)".to_string(),
+            Language::FrFr => "Bâtiments & Adresses (BAG)".to_string(),
+            _ => "Buildings & Addresses (BAG)".to_string(),
+        }),
+        "NWB" | "Road Network" => Some(match lang {
+            Language::ArSa => "شبكة الطرق الوطنية (NWB)".to_string(),
+            Language::FrFr => "Réseau routier (NWB)".to_string(),
+            _ => "Road Network (NWB)".to_string(),
+        }),
+        "Hectometer" | "Hectometer Points" => Some(match lang {
+            Language::ArSa => "نقاط الهكتومتر".to_string(),
+            Language::FrFr => "Bornes hectométriques".to_string(),
+            _ => "Hectometer Points".to_string(),
+        }),
+        "Spoor" | "Railway Tracks" => Some(match lang {
+            Language::ArSa => "خطوط السكك الحديدية".to_string(),
+            Language::FrFr => "Voies ferrées".to_string(),
+            _ => "Railway Tracks".to_string(),
+        }),
+        "KLIC" | "Utilities & Cables" => Some(match lang {
+            Language::ArSa => "شبكات المرافق والكابلات (KLIC)".to_string(),
+            Language::FrFr => "Réseaux et câbles (KLIC)".to_string(),
+            _ => "Utilities & Cables (KLIC)".to_string(),
+        }),
+        "KLIC Import" => Some(match lang {
+            Language::ArSa => "استيراد شبكات KLIC".to_string(),
+            Language::FrFr => "Importer réseaux KLIC".to_string(),
+            _ => "KLIC Import".to_string(),
+        }),
+        "BRK" | "BRK Cadastre" => Some(match lang {
+            Language::ArSa => "السجل العقاري الهولندي (BRK)".to_string(),
+            Language::FrFr => "Cadastre BRK".to_string(),
+            _ => "BRK Cadastre".to_string(),
+        }),
+        "Site" | "Project Site" => Some(match lang {
+            Language::ArSa => "موقع المشروع".to_string(),
+            Language::FrFr => "Site du projet".to_string(),
+            _ => "Project Site".to_string(),
+        }),
+
+        // Tooltips & Descriptions
+        "Projectlocatie instellen" => Some(match lang {
+            Language::ArSa => "تحديد موقع المشروع وإحداثيات الموقع الجغرافي".to_string(),
+            Language::FrFr => "Définir l'emplacement et les coordonnées du projet".to_string(),
+            _ => "Set project location and geographic coordinates".to_string(),
+        }),
+        "WMS/TMS achtergrondkaarten laden" => Some(match lang {
+            Language::ArSa => "تحميل خرائط الأساس WMS/TMS كخلفية للرسم".to_string(),
+            Language::FrFr => "Charger les cartes d'arrière-plan WMS/TMS".to_string(),
+            _ => "Load WMS/TMS background maps".to_string(),
+        }),
+        "OpenStreetMap vectoren en tegels importeren" => Some(match lang {
+            Language::ArSa => "استيراد متجهات وبلاطات خريطة OpenStreetMap".to_string(),
+            Language::FrFr => "Importer les vecteurs et tuiles OpenStreetMap".to_string(),
+            _ => "Import OpenStreetMap vectors and tiles".to_string(),
+        }),
+        "WFS vectorlagen ophalen" => Some(match lang {
+            Language::ArSa => "جلب طبقات المعالم المتجهة عبر خدمة WFS".to_string(),
+            Language::FrFr => "Récupérer les couches vectorielles WFS".to_string(),
+            _ => "Fetch WFS vector layers".to_string(),
+        }),
+        "BGT grootschalige basiskaart" => Some(match lang {
+            Language::ArSa => "خريطة الأساس الطبوغرافية التفصيلية BGT".to_string(),
+            Language::FrFr => "Carte de base topographique détaillée BGT".to_string(),
+            _ => "BGT detailed base map".to_string(),
+        }),
+        "Kadastrale percelen en grenzen" => Some(match lang {
+            Language::ArSa => "القطع والحدود العقارية الرسمية".to_string(),
+            Language::FrFr => "Parcelles et limites cadastrales officielles".to_string(),
+            _ => "Cadastral parcels and official boundaries".to_string(),
+        }),
+        "Kabels en leidingen conform KLIC" => Some(match lang {
+            Language::ArSa => "كابلات وشبكات الأنابيب والمرافق العامة".to_string(),
+            Language::FrFr => "Câbles et canalisations souterraines".to_string(),
+            _ => "Underground utility cables and pipes".to_string(),
+        }),
+        "Tekenblad kaders en noordpijl" => Some(match lang {
+            Language::ArSa => "إطارات لوحة الرسم وسهم الشمال ومقياس الرسم".to_string(),
+            Language::FrFr => "Cadres de dessin, flèche nord et échelle".to_string(),
+            _ => "Drawing sheet frames, north arrow and scale".to_string(),
+        }),
+        "Gebied selecteren en downloaden" => Some(match lang {
+            Language::ArSa => "تحديد نطاق المنطقة الجغرافية وتنزيل البيانات".to_string(),
+            Language::FrFr => "Sélectionner la zone et télécharger les données".to_string(),
+            _ => "Select geographic area and download data".to_string(),
+        }),
+        "Informatie over geselecteerd punt" => Some(match lang {
+            Language::ArSa => "معلومات وتفاصيل النقطة الجغرافية المحددة".to_string(),
+            Language::FrFr => "Informations sur le point sélectionné".to_string(),
+            _ => "Information about selected geographic point".to_string(),
+        }),
+        "Coordinatenstelsel configureren" => Some(match lang {
+            Language::ArSa => "ضبط وتكوين نظام الإحداثيات والمرجع الجغرافي (CRS)".to_string(),
+            Language::FrFr => "Configurer le système de référence de coordonnées (CRS)".to_string(),
+            _ => "Configure coordinate reference system (CRS)".to_string(),
+        }),
+        "WMS/WFS serverlijst beheren" => Some(match lang {
+            Language::ArSa => "إدارة قائمة خوادم الخرائط WMS/WFS".to_string(),
+            Language::FrFr => "Gérer la liste des serveurs cartographiques WMS/WFS".to_string(),
+            _ => "Manage WMS/WFS map servers list".to_string(),
+        }),
+
+        _ => None,
+    }
+}
+
 /// Catalog ids of a source string, memoized per thread. The catalog is one
 /// string `match` over thousands of arms, a linear scan per call; labels are
 /// looked up on every view pass and per selected object in the Properties
@@ -681,6 +902,9 @@ pub fn translate(source: impl AsRef<str>) -> Cow<'static, str> {
     let source = source.as_ref();
     if let Some(parcels_term) = translate_parcels_term(source) {
         return Cow::Owned(parcels_term);
+    }
+    if let Some(infra_term) = translate_open_infra_term(source) {
+        return Cow::Owned(infra_term);
     }
     catalog_ids(source)
         .map(|(message_id, attribute_id)| Cow::Owned(loader().get_attr(message_id, attribute_id)))
@@ -789,7 +1013,18 @@ pub fn ribbon_module_title(id: &str, fallback: &str) -> String {
             Language::FrFr => "Parcelles".to_string(),
             _ => "Parcels".to_string(),
         },
-        _ => fallback.to_string(),
+        "openaec.open-infra" | "open-infra" => match active_language() {
+            Language::ArSa => "البنية التحتية — نظم المعلومات الجغرافية".to_string(),
+            Language::FrFr => "Open Infra — SIG".to_string(),
+            _ => "Open Infra — GIS".to_string(),
+        },
+        _ => {
+            if let Some(term) = translate_open_infra_term(fallback) {
+                term
+            } else {
+                fallback.to_string()
+            }
+        }
     }
 }
 
@@ -1092,5 +1327,48 @@ mod tests {
         load_language(&loader, Language::ElGr).expect("Greek Fluent resources must parse");
         assert_eq!(loader.get_attr("language", "greek"), "Ελληνικά");
         assert_eq!(serde_json::to_string(&Language::ElGr).unwrap(), "\"el-GR\"");
+    }
+
+    #[test]
+    fn open_infra_translation_round_trips() {
+        // Test Arabic
+        set_language(Language::ArSa).unwrap();
+        assert_eq!(translate("Geo-locatie"), "الموقع الجغرافي");
+        assert_eq!(translate("Kaartbeeld"), "صورة الخريطة");
+        assert_eq!(translate("Vectordata"), "البيانات المتجهة");
+        assert_eq!(translate("OpenStreetMap"), "خرائط الشوارع (OSM)");
+        assert_eq!(translate("Kadaster"), "السجل العقاري");
+        assert_eq!(translate("KLIC"), "شبكات المرافق والكابلات (KLIC)");
+        assert_eq!(
+            ribbon_module_title("openaec.open-infra", "Open Infra - GIS"),
+            "البنية التحتية — نظم المعلومات الجغرافية"
+        );
+
+        // Test French
+        set_language(Language::FrFr).unwrap();
+        assert_eq!(translate("Geo-locatie"), "Géo-localisation");
+        assert_eq!(translate("Kaartbeeld"), "Image cartographique");
+        assert_eq!(translate("Vectordata"), "Données vectorielles");
+        assert_eq!(translate("OpenStreetMap"), "OpenStreetMap (OSM)");
+        assert_eq!(translate("Kadaster"), "Cadastre");
+        assert_eq!(
+            ribbon_module_title("openaec.open-infra", "Open Infra - GIS"),
+            "Open Infra — SIG"
+        );
+
+        // Test English
+        set_language(Language::EnUs).unwrap();
+        assert_eq!(translate("Geo-locatie"), "Geo Location");
+        assert_eq!(translate("Kaartbeeld"), "Map View");
+        assert_eq!(translate("Vectordata"), "Vector Data");
+        assert_eq!(translate("OpenStreetMap"), "OpenStreetMap");
+        assert_eq!(translate("Kadaster"), "Cadastre");
+        assert_eq!(
+            ribbon_module_title("openaec.open-infra", "Open Infra - GIS"),
+            "Open Infra — GIS"
+        );
+
+        // Reset
+        let _ = set_language(Language::System);
     }
 }

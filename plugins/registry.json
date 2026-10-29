@@ -2,7 +2,7 @@
   {
     "repo": "OpenAEC-Foundation/Open-Infra",
     "name": "Open Infra - GIS",
-    "description": "GIS-workbench en NLCS-basisdata voor infra en civiele techniek: projectlocatie, WMS/WFS-servers, OpenStreetMap, BGT, kadaster en KLIC conform NLCS. Nederland (PDOK) en wereldwijd."
+    "description": "GIS workbench and NLCS base data for infrastructure and civil engineering: project location, WMS/WFS servers, OpenStreetMap, BGT, cadastre, and utilities."
   },
   {
     "repo": "HakanSeven12/opencad-example-plugin",
