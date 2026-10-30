@@ -15,13 +15,12 @@
 //! list as if it were editable history would promise exactly that. It is a
 //! table of contents, and it is labelled as one.
 
-use crate::app::commands::civil_surface::TinSurfaceData;
 use crate::app::Message;
 use crate::ui::dock::PanelId;
 use codec::objects::SolidHistoryOperation;
 use codec::{Document, EntityType, Handle};
-use iced::widget::{button, column, container, row, scrollable, text};
-use iced::{Background, Border, Element, Fill, Theme};
+use iced::widget::{button, column, container, scrollable, text};
+use iced::{Background, Element, Fill, Theme};
 
 /// The three world planes, with the argument `CREATESKETCH` takes for each.
 const ORIGIN_PLANES: [(&str, &str); 3] = [("XY", "XY"), ("XZ", "XZ"), ("YZ", "YZ")];
@@ -62,140 +61,6 @@ fn bodies(document: &Document) -> Vec<(Handle, String)> {
             (handle, format!("{label} {:X}", handle.value()))
         })
         .collect()
-}
-
-/// Every TIN Surface (`PolyfaceMesh` or `Mesh`) in model space.
-fn surfaces(document: &Document) -> Vec<TinSurfaceData> {
-    document
-        .entities()
-        .filter_map(TinSurfaceData::from_entity)
-        .collect()
-}
-
-fn surface_card(surf: &TinSurfaceData) -> Element<'static, Message> {
-    let handle_hex = format!("{:X}", surf.handle.value());
-    let title = format!("{} [{}]", surf.name, handle_hex);
-
-    let stats_text = format!(
-        "Z: {:.1}..{:.1}m | Area: {:.0}m² | {} tris",
-        surf.min_z,
-        surf.max_z,
-        surf.area_2d,
-        surf.triangles.len()
-    );
-
-    let title_btn = button(
-        row![
-            text("📐").size(11),
-            text(title).size(11.5),
-        ]
-        .spacing(4)
-        .align_y(iced::Center)
-    )
-        .on_press(Message::OpenSurfaceProperties(surf.handle))
-        .width(Fill)
-        .padding([2, 4])
-        .style(button::subtle);
-
-    let btn_zoom = button(text("🔍 Zoom").size(10))
-        .on_press(Message::Command(format!("SELECT {handle_hex}")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_props = button(text("⚙ Props").size(10))
-        .on_press(Message::OpenSurfaceProperties(surf.handle))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::primary);
-
-    let btn_stats = button(text("📊 Stats").size(10))
-        .on_press(Message::Command(format!("SURFACESTATS {handle_hex}")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_xml = button(text("📤 LandXML").size(10))
-        .on_press(Message::Command(format!("SURFACELANDXML {handle_hex}")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    // Style toggles (Civil 3D Surface Styles)
-    let btn_style_tri = button(text("🔺 Triangles").size(10))
-        .on_press(Message::Command(format!("SURFACESTYLE {handle_hex} TRIANGLES")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_style_cont = button(text("〰 Contours").size(10))
-        .on_press(Message::Command(format!("SURFACESTYLE {handle_hex} CONTOURS")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_style_both = button(text("🔲 Both").size(10))
-        .on_press(Message::Command(format!("SURFACESTYLE {handle_hex} BOTH")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    // TIN Operations (Civil 3D Surface Edits)
-    let btn_swap = button(text("🔄 Swap").size(10))
-        .on_press(Message::Command(format!("SURFACESWAPEDGE {handle_hex}")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_raise = button(text("⬆ +1m").size(10))
-        .on_press(Message::Command(format!("SURFACERAISELOWER {handle_hex} 1.0")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_lower = button(text("⬇ -1m").size(10))
-        .on_press(Message::Command(format!("SURFACERAISELOWER {handle_hex} -1.0")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let btn_del = button(text("✂ Del Tri").size(10))
-        .on_press(Message::Command(format!("SURFACEDELETETRI {handle_hex}")))
-        .width(Fill)
-        .padding([3, 2])
-        .style(button::secondary);
-
-    let row1 = row![btn_zoom, btn_props, btn_stats, btn_xml].spacing(3).width(Fill);
-    let row2 = row![btn_style_tri, btn_style_cont, btn_style_both].spacing(3).width(Fill);
-    let row3 = row![btn_swap, btn_raise, btn_lower, btn_del].spacing(3).width(Fill);
-
-    let card_content = column![
-        title_btn,
-        container(
-            text(stats_text)
-                .size(10)
-                .style(crate::ui::style::common::muted_style)
-        )
-        .padding([0, 4]),
-        row1,
-        row2,
-        row3,
-    ]
-    .spacing(3);
-
-    container(card_content)
-        .width(Fill)
-        .padding([4, 6])
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
 }
 
 /// Feature Lines / Breaklines in model space.
@@ -267,94 +132,11 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let title_bar = crate::ui::dock::title_bar(
         PanelId::Browser,
-        "Prospector (Toolspace)".to_string(),
+        crate::t!("Browser").into_owned(),
         chrome,
     );
 
     let mut tree = column![].spacing(1);
-
-    // ── Prospector: Civil 3D Surfaces & Feature Lines ──────────────────
-    let surfs = surfaces(document);
-    tree = tree.push(section_header(format!("Prospector - Surfaces ({})", surfs.len())));
-
-    let create_surf_btn = button(
-        row![
-            text("➕").size(11),
-            text("Create Surface from Points").size(11),
-        ]
-        .spacing(5)
-    )
-    .on_press(Message::Command("SURFACECREATE Ground".to_string()))
-    .width(Fill)
-    .padding([4, 8])
-    .style(button::secondary);
-
-    tree = tree.push(container(create_surf_btn).padding([2, 4]));
-
-    if surfs.is_empty() {
-        tree = tree.push(note_row("No surfaces in drawing".to_string()));
-    } else {
-        if surfs.len() >= 2 {
-            let volume_btn = button(
-                row![
-                    text("⚖").size(12),
-                    text("Calculate Cut / Fill Volume").size(11),
-                ]
-                .spacing(5)
-            )
-            .on_press(Message::Command("SURFACEVOLUME".to_string()))
-            .width(Fill)
-            .padding([5, 8])
-            .style(button::primary);
-
-            tree = tree.push(container(volume_btn).padding([2, 4]));
-        }
-
-        for surf in &surfs {
-            tree = tree.push(surface_card(surf));
-        }
-    }
-
-    // ── Civil 3D Road Profile Views ───────────────────────────────────────
-    tree = tree.push(section_header("Civil 3D Road Profiles & Views".to_string()));
-
-    let pview_tools_btn = button(
-        row![
-            text("📐").size(11),
-            text("Profile Layout Tools (Floating)").size(11),
-        ]
-        .spacing(5)
-    )
-    .on_press(Message::OpenProfileLayoutTools)
-    .width(Fill)
-    .padding([4, 8])
-    .style(button::primary);
-
-    let pview_props_btn = button(
-        row![
-            text("⚙").size(11),
-            text("Profile View Properties (Full)").size(11),
-        ]
-        .spacing(5)
-    )
-    .on_press(Message::OpenProfileViewProperties(None))
-    .width(Fill)
-    .padding([4, 8])
-    .style(button::secondary);
-
-    let pview_create_btn = button(
-        row![
-            text("⊞").size(11),
-            text("Create Profile View Grid").size(11),
-        ]
-        .spacing(5)
-    )
-    .on_press(Message::StartProfileViewCreation)
-    .width(Fill)
-    .padding([4, 8])
-    .style(button::secondary);
-
-    tree = tree.push(container(column![pview_tools_btn, pview_props_btn, pview_create_btn].spacing(3)).padding([2, 4]));
 
     let fls = featurelines(document);
     if !fls.is_empty() {
@@ -367,18 +149,7 @@ pub fn view<'a>(
     let pts = survey_points_count(document);
     if pts > 0 {
         tree = tree.push(section_header(format!("Survey Points ({pts})")));
-        let pts_tri_btn = button(
-            row![
-                text("📐").size(11),
-                text("Triangulate Survey Points -> TIN").size(11),
-            ]
-            .spacing(5)
-        )
-        .on_press(Message::Command("SURFACECREATE Survey_TIN".to_string()))
-        .width(Fill)
-        .padding([4, 8])
-        .style(button::secondary);
-        tree = tree.push(container(pts_tri_btn).padding([2, 4]));
+
     }
 
     // ── Modeling & Solid Bodies (Secondary) ───────────────────────────────

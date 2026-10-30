@@ -73,16 +73,7 @@ impl OpenCADStudio {
             Some(K::CountInvalidArea) => crate::t!("Count - Invalid Area").into_owned(),
             Some(K::Field) => crate::t!("Field").into_owned(),
             Some(K::DraftingSettings) => crate::t!("Drafting Settings").into_owned(),
-            Some(K::SurfaceProperties) => self
-                .surface_properties_state
-                .as_ref()
-                .map(|s| format!("Surface Properties - {}", s.name))
-                .unwrap_or_else(|| "Surface Properties".to_string()),
-Some(K::ProfileViewProperties) => self
-                .profile_view_properties_state
-                .as_ref()
-                .map(|s| format!("Profile View Properties - {}", s.view_id))
-                .unwrap_or_else(|| "Profile View Properties".to_string()),
+
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
             Some(K::LayerStateEditor) => crate::tr!("modal", "edit-layer-state"),
             Some(K::Plot) => crate::tr!("modal", "plot"),
@@ -326,26 +317,7 @@ Some(K::ProfileViewProperties) => self
                     }
                 })
             }
-            super::super::ModalKind::SurfaceProperties => {
-                let state = self.surface_properties_state.as_ref();
-                sized_flow(ex, 640, 520, |flow| {
-                    if let Some(state) = state {
-                        crate::ui::window::surface_properties::view_window(state, flow)
-                    } else {
-                        iced::widget::Space::new().into()
-                    }
-                })
-            }
-            super::super::ModalKind::ProfileViewProperties => {
-                let state = self.profile_view_properties_state.as_ref();
-                sized_flow(ex, 660, 540, |flow| {
-                    if let Some(state) = state {
-                        crate::ui::window::profile_view_properties::view_window(state, flow)
-                    } else {
-                        iced::widget::Space::new().into()
-                    }
-                })
-            }
+
             super::super::ModalKind::AutoConstrainSettings => sized_flow(ex, 620, 610, |flow| {
                 crate::ui::window::auto_constrain_settings::view_window(
                     &self.auto_constrain_settings,

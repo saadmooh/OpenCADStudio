@@ -2549,31 +2549,7 @@ bg={bg_ms:.1}ms n={view_count}"
             }
 
 
-            // Modeless floating Civil 3D Profile View Creation Dialog (appears before placement)
-            if !tab.is_start && self.show_profile_view_creation_dialog {
-                if let Some(state) = &self.profile_view_properties_state {
-                    viewport_stack = viewport_stack.push(position_canvas_overlay(
-                        self.profile_creation_dialog_anchor,
-                        crate::ui::window::profile_view_properties::view_creation_dialog(
-                            state,
-                            &self.available_alignments_cache,
-                        ),
-                    ));
-                }
-            }
 
-            // Modeless floating Civil 3D Profile Layout Tools toolbar/palette (appears after placement)
-            if !tab.is_start && self.show_profile_layout_tools {
-                if let Some(state) = &self.profile_view_properties_state {
-                    viewport_stack = viewport_stack.push(position_canvas_overlay(
-                        self.profile_palette_anchor,
-                        crate::ui::window::profile_view_properties::view_floating_palette(
-                            state,
-                            self.profile_palette_collapsed,
-                        ),
-                    ));
-                }
-            }
         }
 
         if self.show_node_graph && !tab.is_start {

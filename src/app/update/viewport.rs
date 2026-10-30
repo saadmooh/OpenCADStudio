@@ -5287,10 +5287,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_viewport_left_release(&mut self) -> Task<Message> {
-        self.profile_palette_dragging = false;
-        self.profile_palette_drag_last = None;
-        self.profile_creation_dialog_dragging = false;
-        self.profile_creation_dialog_drag_last = None;
+
 
         let i = self.active_tab;
         // A click fires after the cursor has settled — clear any pending
@@ -8578,7 +8575,6 @@ properties={:.1}ms picked={}",
                 self.tabs[i].scene.preview_hidden.remove(&handle);
             }
             self.tabs[i].scene.clear_preview_wire();
-            let handle_slice = handles.clone();
             let changes: Vec<_> = handles
                 .into_iter()
                 .map(|handle| (handle, crate::scene::ChangeKind::Modified))
@@ -8586,7 +8582,6 @@ properties={:.1}ms picked={}",
             self.tabs[i]
                 .scene
                 .bump_entities_after_parametric_solve(&changes);
-            self.sync_dynamic_profile_views_on_change(i, Some(&handle_slice));
         }
         // Placement confirmed — keep the just-added leader.
         self.grip_add_provisional = None;
@@ -8633,7 +8628,6 @@ properties={:.1}ms picked={}",
                 .scene
                 .bump_entities_after_parametric_solve(&restored);
             self.finish_pending_history(i);
-            self.sync_dynamic_profile_views_on_change(i, None);
             self.tabs[i].dirty = true;
         }
         self.tabs[i].snap_result = None;

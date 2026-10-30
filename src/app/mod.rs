@@ -603,18 +603,7 @@ pub(super) struct OpenCADStudio {
     drafting_settings_state: Option<crate::ui::window::drafting_settings::DraftingSettingsState>,
     drafting_settings_saved: Option<crate::ui::window::drafting_settings::DraftingSettingsState>,
     drafting_settings_close_confirm: bool,
-    pub surface_properties_state: Option<crate::ui::window::surface_properties::SurfacePropertiesState>,
-    pub profile_view_properties_state: Option<crate::ui::window::profile_view_properties::ProfileViewPropertiesState>,
-    pub show_profile_layout_tools: bool,
-    pub profile_palette_collapsed: bool,
-    pub profile_palette_anchor: iced::Point,
-    pub profile_palette_dragging: bool,
-    pub profile_palette_drag_last: Option<iced::Point>,
-    pub show_profile_view_creation_dialog: bool,
-    pub profile_creation_dialog_anchor: iced::Point,
-    pub profile_creation_dialog_dragging: bool,
-    pub profile_creation_dialog_drag_last: Option<iced::Point>,
-    pub available_alignments_cache: Vec<String>,
+
     scale_popup_open: bool,
     /// True while the polar-tracking angle picker is open.
     polar_popup_open: bool,
@@ -2722,8 +2711,7 @@ pub enum ModalKind {
     CountInvalidArea,
     Field,
     DraftingSettings,
-    SurfaceProperties,
-    ProfileViewProperties,
+
     AutoConstrainSettings,
     LayerStateEditor,
     Plot,
@@ -4121,60 +4109,6 @@ pub enum Message {
     DraftingSettingsClose,
     DraftingSettingsCloseDiscard,
     DraftingSettingsCloseKeep,
-    // ── Surface Properties Dialog ─────────────────────────────────────────
-    OpenSurfaceProperties(codec::Handle),
-    SurfacePropertiesTabChanged(crate::ui::window::surface_properties::SurfacePropertiesTab),
-    SurfacePropertiesNameChanged(String),
-    SurfacePropertiesDescriptionChanged(String),
-    SurfacePropertiesStyleChanged(String),
-    SurfacePropertiesMaterialChanged(String),
-    SurfacePropertiesToggleLocked,
-    SurfacePropertiesToggleTooltips,
-    SurfacePropertiesExcludeMinToggled(bool),
-    SurfacePropertiesExcludeMinChanged(String),
-    SurfacePropertiesExcludeMaxToggled(bool),
-    SurfacePropertiesExcludeMaxChanged(String),
-    SurfacePropertiesMaxTriToggled(bool),
-    SurfacePropertiesMaxTriChanged(String),
-    SurfacePropertiesApply,
-    SurfacePropertiesOk,
-    SurfacePropertiesClose,
-    SurfacePropertiesHelp,
-    SurfacePropertiesRebuild,
-    // ── Profile View Properties Dialog ────────────────────────────────────
-    OpenProfileViewProperties(Option<String>),
-    ProfileViewPropertiesTabChanged(crate::ui::window::profile_view_properties::ProfileViewPropertiesTab),
-    ProfileViewPropertiesSurfaceToggled(usize, bool),
-    ProfileViewPropertiesRefChanged(String),
-    ProfileViewPropertiesScaleChanged(String),
-    ProfileViewPropertiesDatumChanged(String),
-    ProfileViewPropertiesMaxElevChanged(String),
-    ProfileViewPropertiesStepChanged(String),
-    ProfileViewPropertiesToggleStationBand(bool),
-    ProfileViewPropertiesToggleEgBand(bool),
-    ProfileViewPropertiesToggleFgBand(bool),
-    ProfileViewPropertiesToggleDiffBand(bool),
-    ProfileViewPropertiesApply,
-    ProfileViewPropertiesOk,
-    ProfileViewPropertiesClose,
-    ProfileViewPropertiesDrawFg,
-    ProfileViewPropertiesHelp,
-    // ── Profile Floating Palette Messages ─────────────────────────────────
-    OpenProfileLayoutTools,
-    ProfilePaletteClose,
-    ProfilePaletteToggleCollapse,
-    ProfilePaletteMoveCorner(usize),
-    ProfilePaletteDragStart,
-    ProfilePaletteDragMove(iced::Point),
-    ProfilePaletteDragEnd,
-    // ── Profile View Creation Dialog Messages ─────────────────────────────
-    StartProfileViewCreation,
-    ProfileViewCreationConfirm,
-    ProfileViewCreationCancel,
-    ProfileViewCreationAlignChanged(String),
-    ProfileCreationDialogDragStart,
-    ProfileCreationDialogDragMove(iced::Point),
-    ProfileCreationDialogDragEnd,
     // ── Universal Global Dragging Messages ────────────────────────────────
     GlobalCursorMoved(iced::Point),
     GlobalPointerReleased,
@@ -5303,18 +5237,7 @@ impl OpenCADStudio {
             drafting_settings_state: None,
             drafting_settings_saved: None,
             drafting_settings_close_confirm: false,
-            surface_properties_state: None,
-            profile_view_properties_state: None,
-            show_profile_layout_tools: false,
-            profile_palette_collapsed: false,
-            profile_palette_anchor: iced::Point::new(60.0, 45.0),
-            profile_palette_dragging: false,
-            profile_palette_drag_last: None,
-            show_profile_view_creation_dialog: false,
-            profile_creation_dialog_anchor: iced::Point::new(120.0, 70.0),
-            profile_creation_dialog_dragging: false,
-            profile_creation_dialog_drag_last: None,
-            available_alignments_cache: Vec::new(),
+
             scale_popup_open: false,
             polar_popup_open: false,
             polar_custom_input: String::new(),
@@ -6272,65 +6195,10 @@ impl OpenCADStudio {
 
     /// Civil 3D Dynamic Reactor: Automatically syncs Profile View grid, sampled surface profiles,
     /// and data bands whenever any sampled surface, area, or design profile is modified in the drawing.
-    pub fn sync_dynamic_profile_views_on_change(
-        &mut self,
-        tab_idx: usize,
-        target_handles: Option<&[codec::Handle]>,
-    ) {
-        if tab_idx >= self.tabs.len() {
-            return;
-        }
-        let tab = &mut self.tabs[tab_idx];
-
-        // Check if document contains any Profile View entities
-        let mut has_pview = false;
-        for ent in tab.scene.document.entities() {
-            if ent.common().extended_data.get_record("LANDSURVEY_PROFILE_VIEW").is_some() {
-                has_pview = true;
-                break;
-            }
-        }
-        if !has_pview {
-            return;
-        }
-
-        // Fast-path filter: if target_handles given, check if any is a TIN surface or alignment
-        if let Some(handles) = target_handles {
-            if handles.is_empty() {
-                return;
-            }
-            let touches_surface_or_align = handles.iter().any(|&h| {
-                if let Some(ent) = tab.scene.document.get_entity(h) {
-                    crate::app::commands::civil_surface::TinSurfaceData::from_entity(ent).is_some()
-                        || ent.common().extended_data.get_record("LANDSURVEY_ALIGN").is_some()
-                        || ent.common().extended_data.get_record("LANDSURVEY_PROFILE").is_some()
-                } else {
-                    false
-                }
-            });
-            if !touches_surface_or_align {
-                return;
-            }
-        }
-
-        if let Some(state) = &self.profile_view_properties_state {
-            let active_surfs: Vec<&str> = state.surfaces.iter().filter(|s| s.is_visible).map(|s| s.name.as_str()).collect();
-            let surfs_str = active_surfs.join(",");
-            let scale = state.vert_exag.trim();
-            let step = state.band_interval.trim();
-            let ref_surf = state.selected_ref_surface.trim();
-            let cmd = format!("LS_PVIEW_PROPS APPLY surfaces={} ref={} scale={} step={}", surfs_str, ref_surf, scale, step);
-            let _ = self.update(Message::Command(cmd));
-        }
-    }
-
-    /// Returns true if any modal dialog or floating tool palette is actively being dragged.
     pub fn is_any_window_dragging(&self) -> bool {
         self.modal_dragging
             || self.modal_resizing
             || self.layer_col_dragging
-            || self.profile_palette_dragging
-            || self.profile_creation_dialog_dragging
     }
 
 }
